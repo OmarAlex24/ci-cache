@@ -150,7 +150,7 @@ el cuerpo de R2 sigue en streaming después). Con `curl -w '%{time_starttransfer
 
 | Binding | Tipo | Para qué |
 | --- | --- | --- |
-| `CACHE` | R2 (`ci-cache`) | la caché; el Worker no tiene llaves de R2 |
+| `CACHE` | R2 (`ci-cache-weur`) | la caché; el Worker no tiene llaves de R2 |
 | `METRICS` | Analytics Engine (dataset `ci_cache`) | un punto por petición |
 
 ### Vars (`wrangler.jsonc`)
@@ -186,11 +186,13 @@ y la entrada con su hash para fusionar en el secret. El Worker nunca guarda llav
 pnpm install
 pnpm wrangler login
 
-# 1. Bucket y las 2 reglas de ciclo de vida (sirven para todos los repos)
-pnpm wrangler r2 bucket create ci-cache
-pnpm wrangler r2 bucket lifecycle add ci-cache ramas-7d ramas/ --expire-days 7 --force
-pnpm wrangler r2 bucket lifecycle add ci-cache main-30d main/ --expire-days 30 --force
-pnpm wrangler r2 bucket lifecycle list ci-cache
+# 1. Bucket y las 2 reglas de ciclo de vida (sirven para todos los repos).
+#    El location hint va cerca de quien compila (Boat: OVH Francia y Polonia → weur);
+#    solo se puede dar al crear el bucket.
+pnpm wrangler r2 bucket create ci-cache-weur --location weur
+pnpm wrangler r2 bucket lifecycle add ci-cache-weur ramas-7d ramas/ --expire-days 7 --force
+pnpm wrangler r2 bucket lifecycle add ci-cache-weur main-30d main/ --expire-days 30 --force
+pnpm wrangler r2 bucket lifecycle list ci-cache-weur
 
 # 2. Secrets
 openssl rand -base64 48 | pnpm wrangler secret put SESSION_SECRET
@@ -205,6 +207,13 @@ pnpm run deploy
 ```
 
 El dataset de Analytics Engine se crea solo con el primer `writeDataPoint`.
+
+**Dónde queda el bucket importa más que todo lo demás.** Cada lectura de sccache o Turbo
+es al menos una operación de R2 (dos en un fallo de una rama, que cae a `main/`), y el
+Worker corre en el colo de Cloudflare más cercano al cliente. Medido desde un sandbox de
+Boat en Varsovia (colo WAW) con un bucket en WNAM, cada operación de R2 tardaba ~180 ms;
+con el bucket en WEUR, 50–120 ms (un fallo de rama, ~110 ms). Llevar el Worker al bucket
+(`placement`) es peor: el cuerpo cruza el Atlántico y una lectura de 512 KB subió a ~0.9 s.
 
 Las reglas de R2 caducan por **fecha de subida**, no de último uso: un artefacto de
 `main/` muy usado igual desaparece a los 30 días, la siguiente CI de `main` falla una vez
