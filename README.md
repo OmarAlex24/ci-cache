@@ -139,8 +139,8 @@ ellos: casi siempre significa que algo entra distinto en las llaves de caché.
 ### Server-Timing
 
 Toda respuesta trae `Server-Timing` con lo que tardó el Worker, en ms: `session`
-(verificar el token), `r2-own` y `r2-main` (cada lectura de R2; en un fallo de una rama
-salen las dos), `r2-put` (escritura) y `total` (hasta que el Worker entrega la respuesta;
+(verificar el token), `r2-own` y `r2-main` (cada lectura de R2; en una rama
+salen las dos porque se leen a la vez), `r2-put` (escritura) y `total` (hasta que el Worker entrega la respuesta;
 el cuerpo de R2 sigue en streaming después). Con `curl -w '%{time_starttransfer}
 %header{server-timing}'` se separa la red del Worker y de R2.
 
@@ -209,7 +209,7 @@ pnpm run deploy
 El dataset de Analytics Engine se crea solo con el primer `writeDataPoint`.
 
 **Dónde queda el bucket importa más que todo lo demás.** Cada lectura de sccache o Turbo
-es al menos una operación de R2 (dos en un fallo de una rama, que cae a `main/`), y el
+es al menos una operación de R2 (una rama lee su prefijo y `main/` a la vez), y el
 Worker corre en el colo de Cloudflare más cercano al cliente. Medido desde un sandbox de
 Boat en Varsovia (colo WAW) con un bucket en WNAM, cada operación de R2 tardaba ~180 ms;
 con el bucket en WEUR, 50–120 ms (un fallo de rama, ~110 ms). Llevar el Worker al bucket

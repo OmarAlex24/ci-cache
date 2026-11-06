@@ -52,32 +52,60 @@ export function readResult(session: SessionClaims, source: ReadSource | null): R
 }
 
 /**
+ * Lee los prefijos del nivel **a la vez** y se queda con el primero que exista, en el
+ * orden de `layout.read` (la rama antes que main/). Así un fallo de rama o un acierto
+ * desde main/ cuesta una ida y vuelta a R2 en vez de dos; a cambio, una rama hace dos
+ * operaciones de lectura de R2 por petición. Las lecturas que sobran se descartan.
+ */
+async function firstInOrder<T>(
+  layout: TierLayout,
+  read: (prefix: string, source: ReadSource) => Promise<T | null>,
+  release: (value: T) => void,
+): Promise<{ object: T; source: ReadSource } | null> {
+  const pending = layout.read.map(({ prefix, source }) => ({ source, result: read(prefix, source) }));
+  let index = 0;
+  try {
+    for (; index < pending.length; index++) {
+      const { source, result } = pending[index]!;
+      const object = await result;
+      if (object) return { object, source };
+    }
+    return null;
+  } finally {
+    // Las que ya no hacen falta: soltar el cuerpo y que su error no quede sin manejar.
+    for (const rest of pending.slice(index + 1)) {
+      rest.result.then((value) => value && release(value), () => undefined);
+    }
+  }
+}
+
+/**
  * GET con fallback: devuelve el primer objeto encontrado y de qué prefijo salió.
  * `time` mide cada lectura como `r2-own` / `r2-main` (Server-Timing).
  */
-export async function getWithFallback(
+export function getWithFallback(
   bucket: R2Bucket,
   layout: TierLayout,
   name: string,
   time: Timer = untimed,
 ): Promise<{ object: R2ObjectBody; source: ReadSource } | null> {
-  for (const { prefix, source } of layout.read) {
-    const object = await time(`r2-${source}`, () => bucket.get(prefix + name));
-    if (object) return { object, source };
-  }
-  return null;
+  return firstInOrder(
+    layout,
+    (prefix, source) => time(`r2-${source}`, () => bucket.get(prefix + name)),
+    (object) => void object.body.cancel().catch(() => undefined),
+  );
 }
 
 /** HEAD con fallback. */
-export async function headWithFallback(
+export function headWithFallback(
   bucket: R2Bucket,
   layout: TierLayout,
   name: string,
   time: Timer = untimed,
 ): Promise<{ object: R2Object; source: ReadSource } | null> {
-  for (const { prefix, source } of layout.read) {
-    const object = await time(`r2-${source}`, () => bucket.head(prefix + name));
-    if (object) return { object, source };
-  }
-  return null;
+  return firstInOrder(
+    layout,
+    (prefix, source) => time(`r2-${source}`, () => bucket.head(prefix + name)),
+    () => undefined,
+  );
 }
