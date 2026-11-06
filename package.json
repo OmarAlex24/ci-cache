@@ -13,7 +13,9 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "cf-typegen": "wrangler types --include-env=false",
-    "e2e:turbo": "node scripts/e2e/turbo.mjs"
+    "e2e:turbo": "node scripts/e2e/turbo.mjs",
+    "e2e:sccache": "node scripts/e2e/sccache.mjs",
+    "e2e": "pnpm e2e:turbo && pnpm e2e:sccache"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",
