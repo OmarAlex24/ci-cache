@@ -12,11 +12,13 @@
     "lint": "oxlint --deny-warnings src test scripts",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
-    "cf-typegen": "wrangler types --include-env=false"
+    "cf-typegen": "wrangler types --include-env=false",
+    "e2e:turbo": "node scripts/e2e/turbo.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",
     "oxlint": "1.89.0",
+    "turbo": "2.11.10",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
     "wrangler": "4.124.0"

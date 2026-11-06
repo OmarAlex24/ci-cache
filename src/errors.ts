@@ -19,6 +19,13 @@ export const forbidden = (message = "Operación no permitida para este token") =
   new HttpError(403, "forbidden", message);
 export const badRequest = (message: string) => new HttpError(400, "bad_request", message);
 
+/**
+ * Cuerpo de error: `{ code, message }`. Bajo /v8/ se repite como `error: { code, message }`
+ * porque el cliente de turbo lee ese formato (el de la API de Vercel) y, si falta, avisa
+ * "unable to parse ... missing field `error`".
+ */
 export function jsonError(c: Context, status: ContentfulStatusCode, code: string, message: string) {
-  return c.json({ code, message }, status);
+  const body: { code: string; message: string; error?: { code: string; message: string } } = { code, message };
+  if (c.req.path.startsWith("/v8/")) body.error = { code, message };
+  return c.json(body, status);
 }

@@ -13,6 +13,7 @@ export interface Env {
   MAIN_WRITE_EVENTS?: string;
   MAIN_REFS?: string;
   SESSION_TTL_SECONDS?: string;
+  MAX_ARTIFACT_BYTES?: string;
 }
 
 declare global {

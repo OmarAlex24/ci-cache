@@ -7,11 +7,14 @@ export interface Config {
   mainWriteEvents: ReadonlySet<string>;
   mainRefs: ReadonlySet<string>;
   sessionTtlSeconds: number;
+  /** Tope por objeto en PUT. 100 MB = tope de cuerpo de un Worker (planes Free/Pro). */
+  maxArtifactBytes: number;
 }
 
 const DEFAULT_MAIN_WRITE_EVENTS = "push";
 const DEFAULT_MAIN_REFS = "refs/heads/main,refs/heads/master";
 const DEFAULT_SESSION_TTL_SECONDS = 6 * 60 * 60;
+const DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024;
 export const MIN_SESSION_SECRET_LENGTH = 32;
 
 function list(value: string | undefined, fallback: string, lowercase = false): Set<string> {
@@ -41,6 +44,7 @@ export function readConfig(env: Env): Config {
     mainWriteEvents: list(env.MAIN_WRITE_EVENTS, DEFAULT_MAIN_WRITE_EVENTS),
     mainRefs: list(env.MAIN_REFS, DEFAULT_MAIN_REFS),
     sessionTtlSeconds: positiveInt(env.SESSION_TTL_SECONDS, DEFAULT_SESSION_TTL_SECONDS),
+    maxArtifactBytes: positiveInt(env.MAX_ARTIFACT_BYTES, DEFAULT_MAX_ARTIFACT_BYTES),
   };
 }
 

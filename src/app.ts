@@ -3,6 +3,7 @@ import type { JWTVerifyGetKey } from "jose";
 
 import { HttpError, jsonError } from "./errors.ts";
 import { sessionRoutes } from "./session/routes.ts";
+import { turboRoutes } from "./turbo/routes.ts";
 import type { AppEnv } from "./types.ts";
 
 export interface AppDeps {
@@ -14,6 +15,7 @@ export function createApp(deps: AppDeps) {
 
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.route("/", sessionRoutes(deps));
+  app.route("/", turboRoutes());
 
   app.notFound((c) => jsonError(c, 404, "not_found", "Ruta no encontrada"));
   app.onError((error, c) => {
