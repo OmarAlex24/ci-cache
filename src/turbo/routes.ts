@@ -6,6 +6,7 @@ import { recordCacheEvent } from "../metrics/record.ts";
 import { requireSession } from "../session/middleware.ts";
 import { getWithFallback, headWithFallback, readResult, tierLayout, type TierLayout } from "../storage/tiers.ts";
 import { putStreaming, writablePrefix } from "../storage/upload.ts";
+import { timer } from "../timing.ts";
 import type { AppEnv } from "../types.ts";
 import type {
   ArtifactInfo,
@@ -100,12 +101,12 @@ export function turboRoutes() {
     const hash = readHash(c);
     const layout = await layoutOf(c);
     if (c.req.method === "HEAD") {
-      const hit = await headWithFallback(c.env.CACHE, layout, hash);
+      const hit = await headWithFallback(c.env.CACHE, layout, hash, timer(c));
       if (!hit) return c.body(null, 404);
       return c.body(null, 200, artifactHeaders(hit.object));
     }
     const session = c.get("session");
-    const hit = await getWithFallback(c.env.CACHE, layout, hash);
+    const hit = await getWithFallback(c.env.CACHE, layout, hash, timer(c));
     if (!hit) {
       recordCacheEvent(c, { protocol: "turbo", result: "miss", writerKind: "", bytes: 0, durationMs: 0 });
       throw notFound();
@@ -138,7 +139,7 @@ export function turboRoutes() {
       metadata[META_TAG] = tag;
     }
 
-    const object = await putStreaming(c, prefix + hash, metadata);
+    const object = await timer(c)("r2-put", () => putStreaming(c, prefix + hash, metadata));
     recordCacheEvent(c, {
       protocol: "turbo",
       result: "write",

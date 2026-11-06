@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { timing } from "hono/timing";
 import type { JWTVerifyGetKey } from "jose";
 
 import { davRoutes } from "./dav/routes.ts";
@@ -18,6 +19,11 @@ export interface AppDeps {
 
 export function createApp(deps: AppDeps) {
   const app = new Hono<AppEnv>();
+
+  // Server-Timing en toda respuesta: `session` (verificar el token), `r2-own`/`r2-main`
+  // (cada lectura de R2) y `total` (hasta que el Worker devuelve la respuesta; el cuerpo
+  // de R2 sigue en streaming después, así que `total` es el primer byte del Worker).
+  app.use(timing({ totalDescription: "" }));
 
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.route("/", sessionRoutes(deps));

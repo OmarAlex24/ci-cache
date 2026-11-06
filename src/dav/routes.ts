@@ -5,6 +5,7 @@ import { recordCacheEvent } from "../metrics/record.ts";
 import { requireSession } from "../session/middleware.ts";
 import { getWithFallback, readResult, tierLayout } from "../storage/tiers.ts";
 import { putStreaming, writablePrefix } from "../storage/upload.ts";
+import { timer } from "../timing.ts";
 import type { AppEnv } from "../types.ts";
 
 // WebDAV mínimo para el backend `webdav` de sccache 0.19 (OpenDAL). Solo implementa
@@ -59,7 +60,7 @@ export function davRoutes() {
   app.get(`${DAV_PREFIX}/*`, async (c) => {
     const { path, isDir } = davPath(c);
     if (isDir) throw new HttpError(404, "not_found", "No encontrado");
-    const hit = await getWithFallback(c.env.CACHE, await layoutOf(c), path);
+    const hit = await getWithFallback(c.env.CACHE, await layoutOf(c), path, timer(c));
     if (path !== CHECK_OBJECT && c.req.method === "GET") {
       recordCacheEvent(c, {
         protocol: "sccache",
@@ -81,7 +82,7 @@ export function davRoutes() {
     if (isDir) throw badRequest("Ruta inválida");
     const prefix = writablePrefix(await layoutOf(c));
     const kind = c.get("session").kind;
-    const object = await putStreaming(c, prefix + path, { [META_WRITER]: kind });
+    const object = await timer(c)("r2-put", () => putStreaming(c, prefix + path, { [META_WRITER]: kind }));
     if (path !== CHECK_OBJECT) {
       recordCacheEvent(c, { protocol: "sccache", result: "write", writerKind: kind, bytes: object.size, durationMs: 0 });
     }

@@ -136,6 +136,14 @@ siguen siendo correctos si AE muestrea. AE guarda los datos 3 meses: el rango m�
 `REUSE_ALERT_MIN_WRITES` objetos en una rama y la CI de esa rama no acertó ninguno de
 ellos: casi siempre significa que algo entra distinto en las llaves de caché.
 
+### Server-Timing
+
+Toda respuesta trae `Server-Timing` con lo que tardó el Worker, en ms: `session`
+(verificar el token), `r2-own` y `r2-main` (cada lectura de R2; en un fallo de una rama
+salen las dos), `r2-put` (escritura) y `total` (hasta que el Worker entrega la respuesta;
+el cuerpo de R2 sigue en streaming después). Con `curl -w '%{time_starttransfer}
+%header{server-timing}'` se separa la red del Worker y de R2.
+
 ## Configuración
 
 ### Bindings (`wrangler.jsonc`)

@@ -1,5 +1,6 @@
 import { branchKey } from "../crypto.ts";
 import type { SessionClaims } from "../session/token.ts";
+import { untimed, type Timer } from "../timing.ts";
 
 /** Protocolos que comparten el layout `<nivel>/<repoId>[/<branchKey>]/<protocolo>/...`. */
 export type Protocol = "turbo" | "sccache";
@@ -50,14 +51,18 @@ export function readResult(session: SessionClaims, source: ReadSource | null): R
   return session.tier === "rama" && source === "main" ? "hit-main" : "hit";
 }
 
-/** GET con fallback: devuelve el primer objeto encontrado y de qué prefijo salió. */
+/**
+ * GET con fallback: devuelve el primer objeto encontrado y de qué prefijo salió.
+ * `time` mide cada lectura como `r2-own` / `r2-main` (Server-Timing).
+ */
 export async function getWithFallback(
   bucket: R2Bucket,
   layout: TierLayout,
   name: string,
+  time: Timer = untimed,
 ): Promise<{ object: R2ObjectBody; source: ReadSource } | null> {
   for (const { prefix, source } of layout.read) {
-    const object = await bucket.get(prefix + name);
+    const object = await time(`r2-${source}`, () => bucket.get(prefix + name));
     if (object) return { object, source };
   }
   return null;
@@ -68,9 +73,10 @@ export async function headWithFallback(
   bucket: R2Bucket,
   layout: TierLayout,
   name: string,
+  time: Timer = untimed,
 ): Promise<{ object: R2Object; source: ReadSource } | null> {
   for (const { prefix, source } of layout.read) {
-    const object = await bucket.head(prefix + name);
+    const object = await time(`r2-${source}`, () => bucket.head(prefix + name));
     if (object) return { object, source };
   }
   return null;
