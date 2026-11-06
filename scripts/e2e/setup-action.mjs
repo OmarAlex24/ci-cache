@@ -19,6 +19,9 @@ const seen = [];
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   seen.push(`${req.method} ${url.pathname}`);
+  // Bajo /roto la caché de sccache responde 500: la acción no debe activar sccache.
+  if (url.pathname.startsWith("/roto/dav")) return res.writeHead(500).end();
+  if (url.pathname.startsWith("/roto/")) url.pathname = url.pathname.slice("/roto".length);
   if (url.pathname === "/oidc") {
     const ok = req.headers.authorization === "bearer req-token" && url.searchParams.get("audience") === "ci-cache";
     res.writeHead(ok ? 200 : 403, { "content-type": "application/json" });
@@ -140,6 +143,8 @@ try {
       'echo "== env"; cat /gh/env; echo "== output"; cat /gh/output; echo "== path"; cat /gh/path',
       'echo "== version"; "$(cat /gh/path)/sccache" --version',
       'echo "== montado"; cat /home/user/demo/marca.txt',
+      `"$(cat /gh/path)/sccache" --stop-server >/dev/null 2>&1 || true; : > /gh/env`,
+      `INPUT_URL=http://host.docker.internal:${port}/roto INPUT_MOUNT_WORKDIR=false bash /setup/setup.sh; echo "== env roto"; cat /gh/env; echo "== fin roto"`,
       'echo "== sha malo"; : > /gh/env; rm -rf /opt/hostedtoolcache; INPUT_SCCACHE_SHA256=$(printf "0%.0s" $(seq 64)) bash /setup/setup.sh && echo "NO FALLÓ" || echo "falló como debe"',
     ].join("\n");
     const res = await run("docker", [
@@ -156,6 +161,8 @@ try {
     check(/== path\n\/opt\/hostedtoolcache\/sccache\/0\.19\.0\/(aarch64|x86_64)\n/.test(out), "agrega sccache al GITHUB_PATH desde la caché de herramientas");
     check(out.includes("== version\nsccache 0.19.0"), "el binario instalado es sccache 0.19.0");
     check(out.includes("workdir=/home/user/demo") && out.includes("== montado\nhola"), "monta el checkout en /home/user/<repo> y lo expone en workdir");
+    const roto = out.split("== env roto")[1]?.split("== fin roto")[0] ?? "RUSTC_WRAPPER";
+    check(out.includes("sccache no arrancó contra la caché remota") && !roto.includes("RUSTC_WRAPPER") && roto.includes("TURBO_TOKEN"), "si la caché de sccache falla al arrancar, no activa sccache y sigue con Turbo");
     check(out.includes("el SHA-256 de sccache no coincide") && out.includes("falló como debe"), "un SHA-256 que no coincide aborta la instalación");
   }
   check(seen.includes("GET /oidc") && seen.includes("POST /v1/session"), "el script habló con los endpoints esperados");

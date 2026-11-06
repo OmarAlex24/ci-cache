@@ -120,16 +120,24 @@ if [[ $want_sccache == true ]]; then
     install -m 0755 "$tmp/$name/sccache" "$dest/sccache"
   fi
   echo "$dest" >>"$GITHUB_PATH"
-  {
-    echo "RUSTC_WRAPPER=sccache"
-    echo "SCCACHE_WEBDAV_ENDPOINT=$url/dav"
-    echo "SCCACHE_WEBDAV_TOKEN=$token"
-    # R2 no tiene directorios: sin esto sccache manda un PROPFIND antes de cada PUT.
-    echo "SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true"
-    # sccache no cachea compilaciones incrementales.
-    echo "CARGO_INCREMENTAL=0"
-  } >>"$GITHUB_ENV"
-  echo "ci-cache: sccache $version listo"
+  # Si la caché remota falla en la comprobación con la que arranca el servidor de
+  # sccache, el servidor no arranca y cada rustc sale con error: la corrida quedaría
+  # roja en vez de solo más lenta. Se arranca aquí y, si falla, no se activa.
+  if SCCACHE_WEBDAV_ENDPOINT="$url/dav" SCCACHE_WEBDAV_TOKEN="$token" SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true \
+    "$dest/sccache" --start-server >/dev/null 2>&1; then
+    {
+      echo "RUSTC_WRAPPER=sccache"
+      echo "SCCACHE_WEBDAV_ENDPOINT=$url/dav"
+      echo "SCCACHE_WEBDAV_TOKEN=$token"
+      # R2 no tiene directorios: sin esto sccache manda un PROPFIND antes de cada PUT.
+      echo "SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true"
+      # sccache no cachea compilaciones incrementales.
+      echo "CARGO_INCREMENTAL=0"
+    } >>"$GITHUB_ENV"
+    echo "ci-cache: sccache $version listo"
+  else
+    echo "::warning::ci-cache: sccache no arrancó contra la caché remota; esta corrida compila sin sccache"
+  fi
 fi
 
 {
