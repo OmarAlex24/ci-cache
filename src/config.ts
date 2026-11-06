@@ -9,12 +9,17 @@ export interface Config {
   sessionTtlSeconds: number;
   /** Tope por objeto en PUT. 100 MB = tope de cuerpo de un Worker (planes Free/Pro). */
   maxArtifactBytes: number;
+  metricsDataset: string;
+  reuseAlertMinWrites: number;
 }
 
 const DEFAULT_MAIN_WRITE_EVENTS = "push";
 const DEFAULT_MAIN_REFS = "refs/heads/main,refs/heads/master";
 const DEFAULT_SESSION_TTL_SECONDS = 6 * 60 * 60;
 const DEFAULT_MAX_ARTIFACT_BYTES = 100 * 1024 * 1024;
+const DEFAULT_METRICS_DATASET = "ci_cache";
+const DEFAULT_REUSE_ALERT_MIN_WRITES = 20;
+const DATASET = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/u;
 export const MIN_SESSION_SECRET_LENGTH = 32;
 
 function list(value: string | undefined, fallback: string, lowercase = false): Set<string> {
@@ -34,6 +39,13 @@ function positiveInt(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function dataset(value: string | undefined): string {
+  const name = value === undefined || value.trim() === "" ? DEFAULT_METRICS_DATASET : value.trim();
+  // Va dentro del SQL: solo identificadores simples.
+  if (!DATASET.test(name)) throw misconfigured();
+  return name;
+}
+
 const misconfigured = () => new HttpError(500, "misconfigured", "El servicio no está configurado");
 
 export function readConfig(env: Env): Config {
@@ -45,6 +57,8 @@ export function readConfig(env: Env): Config {
     mainRefs: list(env.MAIN_REFS, DEFAULT_MAIN_REFS),
     sessionTtlSeconds: positiveInt(env.SESSION_TTL_SECONDS, DEFAULT_SESSION_TTL_SECONDS),
     maxArtifactBytes: positiveInt(env.MAX_ARTIFACT_BYTES, DEFAULT_MAX_ARTIFACT_BYTES),
+    metricsDataset: dataset(env.METRICS_DATASET),
+    reuseAlertMinWrites: positiveInt(env.REUSE_ALERT_MIN_WRITES, DEFAULT_REUSE_ALERT_MIN_WRITES),
   };
 }
 

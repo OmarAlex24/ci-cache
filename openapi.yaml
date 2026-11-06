@@ -1,0 +1,639 @@
+openapi: 3.1.0
+info:
+  title: ci-cache
+  version: 0.1.0
+  summary: Caché de CI (Turbo y sccache) sobre Cloudflare R2, con niveles anti-envenenamiento.
+  description: |
+    Worker de Cloudflare que guarda en R2 la caché de Turbo (Remote Cache API v8) y de
+    sccache (WebDAV), por repositorio. El nivel (`main`, `main-ro`, `rama`) sale de la
+    identidad del cliente, nunca de lo que pida.
+
+    Flujo: el cliente cambia su credencial (OIDC de GitHub Actions o llave de sandbox) por
+    un token de sesión en `POST /v1/session` y usa ese token en `/v8/*` y `/dav/*`. Las
+    métricas (`/v1/stats*`) usan llaves de solo lectura aparte, que no sirven para la caché.
+
+    Todos los errores son JSON `{ code, message }` sin detalles internos. Bajo `/v8/` el
+    error se repite como `error: { code, message }`, el formato que lee el cliente de turbo.
+
+    Tipos de Turbo adaptados del spec de
+    [turborepo-remote-cache-cloudflare](https://github.com/AdiRishi/turborepo-remote-cache-cloudflare)
+    (MIT, © 2023 Adishwar Rishi).
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: https://ci-cache.example.workers.dev
+    description: Sustituye por la URL del Worker desplegado
+  - url: http://localhost:8787
+    description: wrangler dev
+
+tags:
+  - name: sesión
+    description: Cambiar una credencial (OIDC de GitHub o llave de sandbox) por un token de sesión.
+  - name: turbo
+    description: Remote Cache API v8 de Turborepo.
+  - name: sccache
+    description: WebDAV mínimo para el backend webdav de sccache.
+  - name: métricas
+    description: Métricas de uso desde Workers Analytics Engine, con llave de solo lectura.
+
+paths:
+  /health:
+    get:
+      summary: Comprobación de vida (único endpoint sin token)
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: El Worker responde
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { const: ok }
+
+  /v1/session:
+    post:
+      tags: [sesión]
+      summary: Cambia una credencial por un token de sesión
+      operationId: createSession
+      description: |
+        Con un token OIDC de GitHub Actions (`Authorization: Bearer <JWT>`) se verifica la
+        firma contra el JWKS de `https://token.actions.githubusercontent.com`, `iss`,
+        `aud == CACHE_AUDIENCE`, `exp`/`nbf` (30 s de margen) y que `repository_owner`
+        esté en `ALLOWED_OWNERS`. El nivel se decide en este orden:
+
+        1. `event_name` ∈ `MAIN_WRITE_EVENTS` y `ref` ∈ `MAIN_REFS` → `main`
+        2. `head_ref` no vacío (pull_request, pull_request_target) → `rama` = `head_ref`
+        3. `ref` ∈ `MAIN_REFS` (schedule, workflow_dispatch, ...) → `main-ro`
+        4. cualquier otra ref → `rama` = nombre de la ref sin `refs/heads/`
+
+        Con una llave de sandbox (`Authorization: Bearer sk_...`) el cuerpo debe traer
+        `branch`; el nivel es SIEMPRE `rama`, aunque la rama se llame `main`. En el caso
+        OIDC el cuerpo se ignora.
+      security:
+        - githubOidc: []
+        - sandboxKey: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SessionRequest" }
+      responses:
+        "200":
+          description: Token de sesión emitido
+          headers:
+            Cache-Control:
+              schema: { const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: El dueño del repositorio no está en ALLOWED_OWNERS
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "503":
+          description: No se pudo descargar el JWKS de GitHub; reintenta
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v8/artifacts/status:
+    get:
+      tags: [turbo]
+      summary: Estado de la caché remota
+      operationId: getArtifactStatus
+      security: [{ sessionToken: [] }]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - $ref: "#/components/parameters/Slug"
+      responses:
+        "200":
+          description: Siempre `enabled` para un token válido
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CachingStatusResponse" }
+        "400": { $ref: "#/components/responses/TurboBadRequest" }
+        "401": { $ref: "#/components/responses/TurboUnauthorized" }
+
+  /v8/artifacts:
+    post:
+      tags: [turbo]
+      summary: Consulta varios artefactos a la vez
+      operationId: artifactQuery
+      description: Aplica el mismo fallback que GET por cada hash (nivel `rama` → su rama y luego main/). Hashes no hexadecimales devuelven `null`. Máximo 1000 hashes.
+      security: [{ sessionToken: [] }]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - $ref: "#/components/parameters/Slug"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ArtifactQueryRequest" }
+      responses:
+        "200":
+          description: Mapa hash → información o null
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactQueryResponse" }
+        "400": { $ref: "#/components/responses/TurboBadRequest" }
+        "401": { $ref: "#/components/responses/TurboUnauthorized" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+
+  /v8/artifacts/events:
+    post:
+      tags: [turbo]
+      summary: Eventos de caché del cliente (se validan y se descartan)
+      operationId: recordEvents
+      security: [{ sessionToken: [] }]
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - $ref: "#/components/parameters/Slug"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 10000
+              items: { $ref: "#/components/schemas/CacheEvent" }
+      responses:
+        "200": { description: "Eventos aceptados (cuerpo vacío)" }
+        "400": { $ref: "#/components/responses/TurboBadRequest" }
+        "401": { $ref: "#/components/responses/TurboUnauthorized" }
+
+  /v8/artifacts/{hash}:
+    parameters:
+      - $ref: "#/components/parameters/ArtifactHash"
+      - $ref: "#/components/parameters/TeamId"
+      - $ref: "#/components/parameters/Slug"
+    get:
+      tags: [turbo]
+      summary: Descarga un artefacto
+      operationId: downloadArtifact
+      description: |
+        Nivel `main` y `main-ro`: lee `main/<repoId>/turbo/<hash>`. Nivel `rama`: lee
+        `ramas/<repoId>/<branchKey>/turbo/<hash>` y, si no está, `main/<repoId>/turbo/<hash>`.
+      security: [{ sessionToken: [] }]
+      responses:
+        "200":
+          description: Artefacto
+          headers:
+            Content-Length: { schema: { type: integer } }
+            x-artifact-duration:
+              description: Duración de la tarea en ms, tal como se subió
+              schema: { type: integer }
+            x-artifact-tag:
+              description: Firma del artefacto, tal como se subió
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, contentMediaType: application/octet-stream }
+        "400": { $ref: "#/components/responses/TurboBadRequest" }
+        "401": { $ref: "#/components/responses/TurboUnauthorized" }
+        "404": { $ref: "#/components/responses/TurboNotFound" }
+    head:
+      tags: [turbo]
+      summary: Comprueba si existe un artefacto (mismo fallback que GET)
+      operationId: artifactExists
+      security: [{ sessionToken: [] }]
+      responses:
+        "200":
+          description: Existe; mismas cabeceras que GET, sin cuerpo
+          headers:
+            Content-Length: { schema: { type: integer } }
+            x-artifact-duration: { schema: { type: integer } }
+            x-artifact-tag: { schema: { type: string } }
+        "400": { description: "Hash inválido" }
+        "401": { description: "Token ausente o inválido" }
+        "404": { description: "No existe" }
+    put:
+      tags: [turbo]
+      summary: Sube un artefacto
+      operationId: uploadArtifact
+      description: |
+        Escribe en el prefijo del nivel (`main/` o la rama). `main-ro` recibe 403. El cuerpo
+        va en streaming a R2: exige `Content-Length` (411 si falta) y no puede superar
+        `MAX_ARTIFACT_BYTES` (100 MB por defecto, el tope de cuerpo de un Worker).
+      security: [{ sessionToken: [] }]
+      parameters:
+        - name: Content-Length
+          in: header
+          required: true
+          schema: { type: integer, minimum: 0, maximum: 104857600 }
+        - name: x-artifact-duration
+          in: header
+          schema: { type: string, pattern: "^[0-9]{1,15}$" }
+        - name: x-artifact-tag
+          in: header
+          schema: { type: string, maxLength: 600 }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, contentMediaType: application/octet-stream }
+      responses:
+        "202":
+          description: Guardado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ArtifactUploadResponse" }
+        "400": { $ref: "#/components/responses/TurboBadRequest" }
+        "401": { $ref: "#/components/responses/TurboUnauthorized" }
+        "403":
+          description: El token es de solo lectura (main-ro)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TurboError" }
+        "411":
+          description: Falta Content-Length
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TurboError" }
+        "413":
+          description: Supera MAX_ARTIFACT_BYTES
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TurboError" }
+
+  /dav/{path}:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        description: |
+          Ruta de sccache, p. ej. `.sccache_check` o `8/e/f/<hash>`. Segmentos
+          `[A-Za-z0-9._-]{1,128}`, sin `.` ni `..`, 512 caracteres como máximo. Se toleran
+          barras repetidas.
+        schema: { type: string }
+    description: |
+      WebDAV mínimo para el backend `webdav` de sccache (probado con sccache 0.19.0).
+      Además de GET y PUT, acepta **PROPFIND** (OpenAPI 3.1 no puede declarar ese método
+      como operación): solo con `Depth: 0` y solo sobre directorios (ruta terminada en `/`,
+      incluido `/dav/`), responde `207 Multi-Status` con `<D:collection/>` y
+      `<D:getlastmodified>`. `Depth` distinto de 0 → 403 (no hay listados); sobre un archivo
+      → 404. Cualquier otro método → 405.
+    x-webdav-methods: [GET, HEAD, PUT, PROPFIND]
+    get:
+      tags: [sccache]
+      summary: Lee un objeto (fallback rama → main/)
+      operationId: davGet
+      security: [{ sessionToken: [] }]
+      responses:
+        "200":
+          description: Objeto
+          content:
+            application/octet-stream:
+              schema: { type: string, contentMediaType: application/octet-stream }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [sccache]
+      summary: Escribe un objeto en el prefijo del nivel
+      operationId: davPut
+      security: [{ sessionToken: [] }]
+      parameters:
+        - name: Content-Length
+          in: header
+          required: true
+          schema: { type: integer, minimum: 0, maximum: 104857600 }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, contentMediaType: application/octet-stream }
+      responses:
+        "201": { description: "Guardado" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Token de solo lectura (main-ro); sccache pasa a modo solo lectura
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "411": { description: "Falta Content-Length" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+
+  /v1/stats:
+    get:
+      tags: [métricas]
+      summary: Aciertos, fallos, bytes y tiempo ahorrado de un repositorio
+      operationId: getStats
+      description: |
+        Consulta Workers Analytics Engine (API SQL) con `CF_ACCOUNT_ID` y `CF_API_TOKEN`.
+        Los conteos usan `SUM(_sample_interval)`, así que son estimaciones si AE muestreó.
+      security: [{ statsKey: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Repo"
+        - $ref: "#/components/parameters/Range"
+      responses:
+        "200":
+          description: Métricas agregadas
+          headers:
+            Cache-Control:
+              schema: { const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatsResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: La llave está limitada a otros repositorios
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/AnalyticsUnavailable" }
+        "503": { $ref: "#/components/responses/MetricsNotConfigured" }
+
+  /v1/stats/branches:
+    get:
+      tags: [métricas]
+      summary: Reutilización por rama de lo que escribió el sandbox
+      operationId: getBranchStats
+      description: |
+        Por rama (solo nivel `rama`): escrituras del sandbox, lecturas y aciertos de la CI,
+        y aciertos de la CI sobre objetos escritos por el sandbox. `reuseAlert` es `true`
+        cuando el sandbox escribió al menos `REUSE_ALERT_MIN_WRITES` objetos y la CI no
+        acertó ninguno de ellos: casi siempre significa que algo difiere entre el sandbox
+        y la CI (ruta del checkout, toolchain, banderas). Ver `scripts/cache-fingerprint.sh`.
+      security: [{ statsKey: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Repo"
+        - $ref: "#/components/parameters/Range"
+      responses:
+        "200":
+          description: Métricas por rama
+          headers:
+            Cache-Control:
+              schema: { const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BranchesResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: La llave está limitada a otros repositorios
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/AnalyticsUnavailable" }
+        "503": { $ref: "#/components/responses/MetricsNotConfigured" }
+
+components:
+  securitySchemes:
+    githubOidc:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token OIDC de GitHub Actions con `aud = CACHE_AUDIENCE` (requiere `permissions.id-token = write`).
+    sandboxKey:
+      type: http
+      scheme: bearer
+      description: Llave de sandbox `sk_...`; el Worker solo guarda su sha256 en `SANDBOX_KEYS`.
+    sessionToken:
+      type: http
+      scheme: bearer
+      description: Token de sesión emitido por `POST /v1/session` (`base64url(claims).base64url(HMAC-SHA256)`).
+    statsKey:
+      type: http
+      scheme: bearer
+      description: Llave de solo lectura `rk_...` de `STATS_KEYS`; no sirve para la caché.
+
+  parameters:
+    ArtifactHash:
+      name: hash
+      in: path
+      required: true
+      description: Hash hexadecimal del artefacto (1–128 caracteres).
+      schema: { type: string, pattern: "^[0-9a-fA-F]{1,128}$" }
+    TeamId:
+      name: teamId
+      in: query
+      description: Se acepta por compatibilidad con turbo pero NO decide el prefijo (lo decide el token).
+      schema: { type: string, maxLength: 256 }
+    Slug:
+      name: slug
+      in: query
+      description: Se acepta por compatibilidad con turbo pero NO decide el prefijo.
+      schema: { type: string, maxLength: 256 }
+    Repo:
+      name: repo
+      in: query
+      required: true
+      description: Id numérico del repositorio de GitHub (no el nombre).
+      schema: { type: string, pattern: "^[1-9][0-9]{0,15}$" }
+    Range:
+      name: range
+      in: query
+      schema:
+        type: string
+        enum: ["1h", "24h", "7d", "30d", "90d"]
+        default: 7d
+
+  responses:
+    BadRequest:
+      description: Entrada inválida
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Token ausente o inválido
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: No encontrado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PayloadTooLarge:
+      description: Cuerpo demasiado grande
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TurboBadRequest:
+      description: Entrada inválida
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TurboError" }
+    TurboUnauthorized:
+      description: Token ausente o inválido
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TurboError" }
+    TurboNotFound:
+      description: Artefacto no encontrado en ninguno de los prefijos que puede leer el token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/TurboError" }
+    AnalyticsUnavailable:
+      description: Analytics Engine no respondió bien
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    MetricsNotConfigured:
+      description: Faltan CF_ACCOUNT_ID o CF_API_TOKEN
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, examples: [unauthorized] }
+        message: { type: string }
+    TurboError:
+      description: "`Error` repetido dentro de `error`, que es lo que lee el cliente de turbo."
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [error]
+          properties:
+            error: { $ref: "#/components/schemas/Error" }
+    Tier:
+      type: string
+      enum: [main, main-ro, rama]
+      description: |
+        - `main`: lee y escribe `main/<repoId>/`.
+        - `main-ro`: solo lee `main/<repoId>/`.
+        - `rama`: lee y escribe `ramas/<repoId>/<branchKey>/`; en un fallo de lectura cae a `main/`.
+    SessionKind:
+      type: string
+      enum: [ci, sandbox]
+    SessionRequest:
+      type: object
+      properties:
+        branch:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Solo con llave de sandbox. Rama de git (sin espacios, controles, `~^:?*[\`, `..`, ni `/` al inicio o al final).
+    SessionResponse:
+      type: object
+      required: [token, expiresAt, repoId, repo, tier, branch, kind]
+      properties:
+        token: { type: string, description: "Token de sesión para /v8 y /dav" }
+        expiresAt: { type: string, format: date-time }
+        repoId: { type: integer }
+        repo: { type: string, examples: [OmarAlex24/horizon-stack] }
+        tier: { $ref: "#/components/schemas/Tier" }
+        branch: { type: string }
+        kind: { $ref: "#/components/schemas/SessionKind" }
+    CachingStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [disabled, enabled, over_limit, paused]
+    ArtifactUploadResponse:
+      type: object
+      required: [urls]
+      properties:
+        urls:
+          type: array
+          items: { type: string }
+    ArtifactQueryRequest:
+      type: object
+      required: [hashes]
+      properties:
+        hashes:
+          type: array
+          maxItems: 1000
+          items: { type: string }
+    ArtifactInfo:
+      type: object
+      required: [size, taskDurationMs]
+      properties:
+        size: { type: integer }
+        taskDurationMs: { type: integer }
+        tag: { type: string }
+    ArtifactQueryResponse:
+      type: object
+      additionalProperties:
+        oneOf:
+          - $ref: "#/components/schemas/ArtifactInfo"
+          - type: "null"
+    CacheEvent:
+      type: object
+      required: [source, event, hash]
+      properties:
+        sessionId: { type: string, maxLength: 64 }
+        source: { type: string, enum: [LOCAL, REMOTE] }
+        event: { type: string, enum: [HIT, MISS] }
+        hash: { type: string, maxLength: 128 }
+        duration: { type: integer, minimum: 0 }
+    Counters:
+      type: object
+      required: [requests, hits, hitsFromMain, misses, writes, bytesRead, bytesWritten, timeSavedMs, hitRate]
+      properties:
+        requests: { type: number, description: "Lecturas (GET) + escrituras (PUT) de objetos" }
+        hits: { type: number, description: "Aciertos, incluidos los servidos desde main/" }
+        hitsFromMain: { type: number, description: "Aciertos de nivel rama servidos desde main/" }
+        misses: { type: number }
+        writes: { type: number }
+        bytesRead: { type: number, description: "Bytes servidos en aciertos" }
+        bytesWritten: { type: number }
+        timeSavedMs: { type: number, description: "Suma de x-artifact-duration de los aciertos (solo Turbo la reporta)" }
+        hitRate:
+          type: [number, "null"]
+          description: hits / (hits + misses), con 4 decimales; null sin lecturas
+    StatsResponse:
+      type: object
+      required: [repoId, range, generatedAt, totals, byTier, byKind, byProtocol]
+      properties:
+        repoId: { type: integer }
+        range: { type: string, enum: ["1h", "24h", "7d", "30d", "90d"] }
+        generatedAt: { type: string, format: date-time }
+        totals: { $ref: "#/components/schemas/Counters" }
+        byTier:
+          type: object
+          required: [main, main-ro, rama]
+          properties:
+            main: { $ref: "#/components/schemas/Counters" }
+            main-ro: { $ref: "#/components/schemas/Counters" }
+            rama: { $ref: "#/components/schemas/Counters" }
+        byKind:
+          type: object
+          required: [ci, sandbox]
+          properties:
+            ci: { $ref: "#/components/schemas/Counters" }
+            sandbox: { $ref: "#/components/schemas/Counters" }
+        byProtocol:
+          type: object
+          required: [turbo, sccache]
+          properties:
+            turbo: { $ref: "#/components/schemas/Counters" }
+            sccache: { $ref: "#/components/schemas/Counters" }
+    BranchStats:
+      type: object
+      required: [branch, sandboxWrites, ciReads, ciHits, ciHitsOnSandboxObjects, reuseAlert]
+      properties:
+        branch: { type: string }
+        sandboxWrites: { type: number, description: "Objetos que escribió el sandbox en la rama" }
+        ciReads: { type: number, description: "Lecturas de la CI en la rama (aciertos + fallos)" }
+        ciHits: { type: number, description: "Aciertos de la CI (de la rama o de main/)" }
+        ciHitsOnSandboxObjects: { type: number, description: "Aciertos de la CI sobre objetos escritos por el sandbox" }
+        reuseAlert: { type: boolean }
+    BranchesResponse:
+      type: object
+      required: [repoId, range, generatedAt, reuseAlertMinWrites, branches]
+      properties:
+        repoId: { type: integer }
+        range: { type: string, enum: ["1h", "24h", "7d", "30d", "90d"] }
+        generatedAt: { type: string, format: date-time }
+        reuseAlertMinWrites: { type: integer }
+        branches:
+          type: array
+          description: Ordenadas por escrituras del sandbox, de mayor a menor
+          items: { $ref: "#/components/schemas/BranchStats" }

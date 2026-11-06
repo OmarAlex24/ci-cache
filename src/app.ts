@@ -2,13 +2,18 @@ import { Hono } from "hono";
 import type { JWTVerifyGetKey } from "jose";
 
 import { davRoutes } from "./dav/routes.ts";
+import type { Env } from "./env.ts";
 import { HttpError, jsonError } from "./errors.ts";
 import { sessionRoutes } from "./session/routes.ts";
+import { analyticsFromEnv, type AnalyticsClient } from "./stats/analytics.ts";
+import { statsRoutes } from "./stats/routes.ts";
 import { turboRoutes } from "./turbo/routes.ts";
 import type { AppEnv } from "./types.ts";
 
 export interface AppDeps {
   jwks: JWTVerifyGetKey;
+  /** Cliente de la API SQL de Analytics Engine (inyectable para pruebas). */
+  analytics?: (env: Env) => AnalyticsClient;
 }
 
 export function createApp(deps: AppDeps) {
@@ -18,6 +23,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", sessionRoutes(deps));
   app.route("/", turboRoutes());
   app.route("/", davRoutes());
+  app.route("/", statsRoutes({ analytics: deps.analytics ?? analyticsFromEnv }));
 
   app.notFound((c) => jsonError(c, 404, "not_found", "Ruta no encontrada"));
   app.onError((error, c) => {

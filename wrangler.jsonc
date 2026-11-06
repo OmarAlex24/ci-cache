@@ -7,6 +7,8 @@
   "compatibility_date": "2026-08-15",
   "observability": { "enabled": true },
   "r2_buckets": [{ "binding": "CACHE", "bucket_name": "ci-cache" }],
+  // Debe coincidir con METRICS_DATASET (las consultas de /v1/stats usan ese nombre).
+  "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "ci_cache" }],
   "vars": {
     // Audiencia que deben traer los tokens OIDC de GitHub Actions.
     "CACHE_AUDIENCE": "ci-cache",
@@ -18,6 +20,9 @@
     // Vida del token de sesión, en segundos (6 h).
     "SESSION_TTL_SECONDS": "21600",
     // Tope por objeto en PUT (100 MB, el tope de cuerpo de un Worker).
-    "MAX_ARTIFACT_BYTES": "104857600"
+    "MAX_ARTIFACT_BYTES": "104857600",
+    "METRICS_DATASET": "ci_cache",
+    // /v1/stats/branches marca reuseAlert si el sandbox escribió al menos esto y la CI no acertó nada.
+    "REUSE_ALERT_MIN_WRITES": "20"
   }
 }
