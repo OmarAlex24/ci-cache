@@ -121,4 +121,22 @@ describe("WebDAV para sccache", () => {
     expect(parseDavPath("/dav//8/e/f/abc")).toEqual({ path: "8/e/f/abc", isDir: false });
     expect(parseDavPath("/dav")).toEqual({ path: "", isDir: true });
   });
+
+  it("Server-Timing separa sesión, cada lectura de R2 y el total", async () => {
+    const path = freshPath();
+    await put(sandbox("feature/st"), path, "x");
+    const timings = (res: Response) =>
+      (res.headers.get("server-timing") ?? "").split(",").map((entry) => entry.split(";")[0]);
+
+    const own = await dav(pr("feature/st"), "GET", `/dav/${path}`);
+    expect(own.status).toBe(200);
+    expect(timings(own)).toEqual(expect.arrayContaining(["session", "r2-own", "total"]));
+    expect(timings(own)).not.toContain("r2-main");
+
+    // Fallo en la rama: lee la rama y luego main/.
+    const miss = await dav(pr("feature/st-otra"), "GET", `/dav/${path}`);
+    expect(miss.status).toBe(404);
+    expect(timings(miss)).toEqual(expect.arrayContaining(["session", "r2-own", "r2-main", "total"]));
+    expect(own.headers.get("server-timing")).toMatch(/r2-own;dur=[0-9.]+/u);
+  });
 });
