@@ -5,7 +5,8 @@
 //   2. CI de PR de la rama X acierta
 //   3. CI de main (push) NO acierta (no lee ramas/) y escribe en main/
 //   4. CI de una rama nueva acierta desde main/
-//   5. main-ro (schedule) lee main/ y no puede escribir
+//   5. main-ro (schedule) lee main/ y, con TURBO_CACHE=remote:r, ni intenta escribir
+//   6. main-ro sin remote:r recibe 403 y no deja nada escrito
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,11 +36,13 @@ function writeFixture(dir) {
   }
 }
 
-async function turbo(dir, url, token) {
+async function turbo(dir, url, token, extraEnv = {}) {
   rmSync(join(dir, "packages/app/dist"), { recursive: true, force: true });
   rmSync(join(dir, ".turbo"), { recursive: true, force: true });
   rmSync(join(dir, "packages/app/.turbo"), { recursive: true, force: true });
-  const result = await run(TURBO, ["run", "build", "--cache=remote:rw", "--output-logs=full"], {
+  // Por defecto solo caché remota (sin la local) para que cada paso pruebe el Worker.
+  const cacheFlag = extraEnv.TURBO_CACHE ? [] : ["--cache=remote:rw"];
+  const result = await run(TURBO, ["run", "build", ...cacheFlag, "--output-logs=full"], {
     cwd: dir,
     env: {
       ...process.env,
@@ -50,6 +53,7 @@ async function turbo(dir, url, token) {
       TURBO_NO_UPDATE_NOTIFIER: "1",
       DO_NOT_TRACK: "1",
       CI: "1",
+      ...extraEnv,
     },
   });
   const out = result.stdout + result.stderr;
@@ -98,14 +102,22 @@ try {
   r = await turbo(dir, worker.url, await id("rama", `feature/otra-${repoId}`, "ci"));
   check(r.code === 0 && r.hit && !r.executed, "rama nueva: acierta desde main/");
 
-  console.log("5. main-ro (schedule)");
-  r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"));
+  console.log("5. main-ro (schedule) con TURBO_CACHE=remote:r, como lo configura setup/action.yml");
+  const readOnly = { TURBO_CACHE: "remote:r" };
+  const puts = () => worker.log().split("\n").filter((line) => /PUT \/v8\/artifacts/.test(line)).length;
+  r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"), readOnly);
   check(r.code === 0 && r.hit, "main-ro: lee main/");
   writeFileSync(join(dir, "packages/app/input.json"), JSON.stringify({ value: 2 }));
+  const before = puts();
+  r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"), readOnly);
+  check(r.code === 0 && r.miss && r.executed, "main-ro: con entrada nueva falla y ejecuta");
+  check(puts() === before, "main-ro: con remote:r turbo no intenta escribir (ningún PUT)");
+
+  console.log("6. main-ro SIN remote:r: el 403 apaga la caché remota del run");
   r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"));
-  check(r.code === 0 && r.miss && r.executed, "main-ro: con entrada nueva falla, ejecuta y el run no se rompe por el 403");
-  const warn = r.out.split("\n").filter((line) => /403|forbidden|failed|error/i.test(line));
-  console.log(`  (turbo ante el 403: ${warn.length ? warn.join(" | ").slice(0, 300) : "sin avisos"})`);
+  check(r.code === 0 && r.miss, "main-ro: el run no se rompe por el 403");
+  const warn = r.out.split("\n").filter((line) => /403/.test(line));
+  console.log(`  (turbo: ${warn.join(" | ").trim().slice(0, 200)})`);
   r = await turbo(dir, worker.url, await id("main", "main", "ci"));
   check(r.miss && r.executed, "main: lo que intentó main-ro no quedó escrito");
 

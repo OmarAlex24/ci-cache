@@ -47,10 +47,11 @@ function freePort() {
 
 /**
  * Levanta `wrangler dev` con R2 local en un directorio temporal, o usa
- * CI_CACHE_URL si ya hay uno corriendo. Devuelve { url, log, stop }.
+ * CI_CACHE_URL si ya hay uno corriendo. `vars` se pasan con --var y tienen
+ * prioridad sobre .dev.vars. Devuelve { url, log, stop }.
  */
-export async function startWorker() {
-  if (process.env.CI_CACHE_URL) {
+export async function startWorker({ vars = {} } = {}) {
+  if (process.env.CI_CACHE_URL && Object.keys(vars).length === 0) {
     return { url: process.env.CI_CACHE_URL.replace(/\/$/, ""), log: () => "", stop: async () => {} };
   }
   readDevVars();
@@ -58,7 +59,18 @@ export async function startWorker() {
   const persist = mkdtempSync(join(tmpdir(), "ci-cache-state-"));
   const child = spawn(
     join(ROOT, "node_modules", ".bin", "wrangler"),
-    ["dev", "--port", String(port), "--ip", "127.0.0.1", "--persist-to", persist, "--log-level", "info"],
+    [
+      "dev",
+      "--port",
+      String(port),
+      "--ip",
+      "127.0.0.1",
+      "--persist-to",
+      persist,
+      "--log-level",
+      "info",
+      ...Object.entries(vars).flatMap(([name, value]) => ["--var", `${name}:${value}`]),
+    ],
     { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, WRANGLER_SEND_METRICS: "false" } },
   );
   let output = "";
