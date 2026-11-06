@@ -152,6 +152,7 @@ try {
     check(res.code === 0, "el script corre en Ubuntu");
     check(out.includes("RUSTC_WRAPPER=sccache") && out.includes(`SCCACHE_WEBDAV_ENDPOINT=http://host.docker.internal:${port}/dav`), "con Cargo.toml exporta RUSTC_WRAPPER y SCCACHE_WEBDAV_ENDPOINT");
     check(out.includes(`SCCACHE_WEBDAV_TOKEN=${SESSION_TOKEN}`) && out.includes("CARGO_INCREMENTAL=0"), "exporta SCCACHE_WEBDAV_TOKEN y CARGO_INCREMENTAL=0");
+    check(out.includes("SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true"), "exporta SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true");
     check(/== path\n\/opt\/hostedtoolcache\/sccache\/0\.19\.0\/(aarch64|x86_64)\n/.test(out), "agrega sccache al GITHUB_PATH desde la caché de herramientas");
     check(out.includes("== version\nsccache 0.19.0"), "el binario instalado es sccache 0.19.0");
     check(out.includes("workdir=/home/user/demo") && out.includes("== montado\nhola"), "monta el checkout en /home/user/<repo> y lo expone en workdir");

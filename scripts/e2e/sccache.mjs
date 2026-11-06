@@ -49,6 +49,8 @@ async function build(dir, url, token, serverPort) {
     SCCACHE_SERVER_PORT: String(serverPort),
     SCCACHE_WEBDAV_ENDPOINT: `${url}/dav`,
     SCCACHE_WEBDAV_TOKEN: token,
+    // Como lo exportan setup.sh y ci-cache-env.sh: sin PROPFIND antes de cada PUT.
+    SCCACHE_WEBDAV_DISABLE_CREATE_DIR: "true",
     SCCACHE_DIR: join(dir, ".sccache-local"),
     RUSTC_WRAPPER: "sccache",
     CARGO_INCREMENTAL: "0",
@@ -126,6 +128,7 @@ try {
   console.log("verbos WebDAV vistos por el Worker:");
   for (const [key, count] of [...verbs].sort()) console.log(`  ${String(count).padStart(3)}  ${key}`);
   check(![...verbs.keys()].some((k) => k.endsWith(" 405")), "ningún verbo sin implementar (405)");
+  check(![...verbs.keys()].some((k) => k.startsWith("PROPFIND ")), "sin PROPFIND (SCCACHE_WEBDAV_DISABLE_CREATE_DIR)");
   console.log("e2e sccache: OK");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

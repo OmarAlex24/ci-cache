@@ -73,6 +73,8 @@ umask 077
   echo "export TURBO_TEAM='${repo#*/}'"
   echo "export SCCACHE_WEBDAV_ENDPOINT='$url/dav'"
   echo "export SCCACHE_WEBDAV_TOKEN='$token'"
+  # R2 no tiene directorios: sin esto sccache manda un PROPFIND antes de cada PUT.
+  echo "export SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true"
   echo "export CARGO_INCREMENTAL=0"
   if command -v sccache >/dev/null 2>&1; then echo "export RUSTC_WRAPPER=sccache"; fi
 } >"$env_file"

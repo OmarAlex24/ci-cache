@@ -63,6 +63,7 @@ try {
   check(r.loaded.TURBO_API === worker.url && r.loaded.TURBO_TEAM === "e2e-sandbox", "exporta TURBO_API y TURBO_TEAM (nombre del repo)");
   check(r.loaded.SCCACHE_WEBDAV_ENDPOINT === `${worker.url}/dav` && r.loaded.SCCACHE_WEBDAV_TOKEN === r.loaded.TURBO_TOKEN, "exporta SCCACHE_WEBDAV_*");
   check(r.loaded.CARGO_INCREMENTAL === "0", "exporta CARGO_INCREMENTAL=0");
+  check(r.loaded.SCCACHE_WEBDAV_DISABLE_CREATE_DIR === "true", "exporta SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true");
   check(r.loaded.RUSTC_WRAPPER === "sccache", "exporta RUSTC_WRAPPER=sccache (sccache está instalado)");
   check(
     JSON.stringify(claims(r.loaded.TURBO_TOKEN)).includes('"tier":"rama","branch":"feature/sandbox-e2e","kind":"sandbox"'),
