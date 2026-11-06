@@ -2,3 +2,8 @@
 SESSION_SECRET=cambia-esto-por-al-menos-32-caracteres-aleatorios
 # JSON: sha256(llave) -> {repoId, repo, label}. Genera llaves con `node scripts/new-key.mjs sandbox`.
 SANDBOX_KEYS={}
+# JSON: sha256(llave) -> {label, repoIds?}. Genera con `node scripts/new-key.mjs stats <etiqueta>`.
+STATS_KEYS={}
+# Solo para /v1/stats contra Analytics Engine real (no hay AE local).
+# CF_ACCOUNT_ID=
+# CF_API_TOKEN=

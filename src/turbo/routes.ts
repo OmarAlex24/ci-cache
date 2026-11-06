@@ -2,8 +2,9 @@ import { Hono, type Context } from "hono";
 
 import { badRequest, HttpError } from "../errors.ts";
 import { readSmallJson } from "../http.ts";
+import { recordCacheEvent } from "../metrics/record.ts";
 import { requireSession } from "../session/middleware.ts";
-import { headWithFallback, getWithFallback, tierLayout, type TierLayout } from "../storage/tiers.ts";
+import { getWithFallback, headWithFallback, readResult, tierLayout, type TierLayout } from "../storage/tiers.ts";
 import { putStreaming, writablePrefix } from "../storage/upload.ts";
 import type { AppEnv } from "../types.ts";
 import type {
@@ -103,8 +104,20 @@ export function turboRoutes() {
       if (!hit) return c.body(null, 404);
       return c.body(null, 200, artifactHeaders(hit.object));
     }
+    const session = c.get("session");
     const hit = await getWithFallback(c.env.CACHE, layout, hash);
-    if (!hit) throw notFound();
+    if (!hit) {
+      recordCacheEvent(c, { protocol: "turbo", result: "miss", writerKind: "", bytes: 0, durationMs: 0 });
+      throw notFound();
+    }
+    const meta = hit.object.customMetadata ?? {};
+    recordCacheEvent(c, {
+      protocol: "turbo",
+      result: readResult(session, hit.source),
+      writerKind: meta[META_WRITER] ?? "",
+      bytes: hit.object.size,
+      durationMs: Number(meta[META_DURATION] ?? 0),
+    });
     return c.body(hit.object.body, 200, artifactHeaders(hit.object));
   });
 
@@ -125,7 +138,14 @@ export function turboRoutes() {
       metadata[META_TAG] = tag;
     }
 
-    await putStreaming(c, prefix + hash, metadata);
+    const object = await putStreaming(c, prefix + hash, metadata);
+    recordCacheEvent(c, {
+      protocol: "turbo",
+      result: "write",
+      writerKind: session.kind,
+      bytes: object.size,
+      durationMs: Number(duration ?? 0),
+    });
     const url = new URL(c.req.url);
     url.search = "";
     return c.json<ArtifactUploadResponse>({ urls: [url.href] }, 202);

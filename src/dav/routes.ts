@@ -1,8 +1,9 @@
 import { Hono, type Context } from "hono";
 
 import { badRequest, forbidden, HttpError } from "../errors.ts";
+import { recordCacheEvent } from "../metrics/record.ts";
 import { requireSession } from "../session/middleware.ts";
-import { getWithFallback, tierLayout } from "../storage/tiers.ts";
+import { getWithFallback, readResult, tierLayout } from "../storage/tiers.ts";
 import { putStreaming, writablePrefix } from "../storage/upload.ts";
 import type { AppEnv } from "../types.ts";
 
@@ -18,6 +19,8 @@ const META_WRITER = "writer-kind";
 // Segmentos tipo `.sccache_check`, `8`, `8efb...`; sin `.` ni `..`.
 const SEGMENT = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,128}$/u;
 const MAX_PATH = 512;
+/** Objeto de prueba que sccache lee y escribe al arrancar: no cuenta en las métricas. */
+const CHECK_OBJECT = ".sccache_check";
 
 /**
  * Ruta relativa bajo /dav validada. Tolera barras repetidas (sccache manda `/dav//x`
@@ -57,6 +60,15 @@ export function davRoutes() {
     const { path, isDir } = davPath(c);
     if (isDir) throw new HttpError(404, "not_found", "No encontrado");
     const hit = await getWithFallback(c.env.CACHE, await layoutOf(c), path);
+    if (path !== CHECK_OBJECT && c.req.method === "GET") {
+      recordCacheEvent(c, {
+        protocol: "sccache",
+        result: hit ? readResult(c.get("session"), hit.source) : "miss",
+        writerKind: hit?.object.customMetadata?.[META_WRITER] ?? "",
+        bytes: hit?.object.size ?? 0,
+        durationMs: 0,
+      });
+    }
     if (!hit) throw new HttpError(404, "not_found", "No encontrado");
     return c.body(hit.object.body, 200, {
       "content-type": "application/octet-stream",
@@ -68,7 +80,11 @@ export function davRoutes() {
     const { path, isDir } = davPath(c);
     if (isDir) throw badRequest("Ruta inválida");
     const prefix = writablePrefix(await layoutOf(c));
-    await putStreaming(c, prefix + path, { [META_WRITER]: c.get("session").kind });
+    const kind = c.get("session").kind;
+    const object = await putStreaming(c, prefix + path, { [META_WRITER]: kind });
+    if (path !== CHECK_OBJECT) {
+      recordCacheEvent(c, { protocol: "sccache", result: "write", writerKind: kind, bytes: object.size, durationMs: 0 });
+    }
     return c.body(null, 201);
   });
 
