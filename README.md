@@ -218,17 +218,67 @@ y lo vuelve a escribir.
 
 ## Integrar
 
-1. **CI (GitHub Actions)**: el job necesita `permissions: id-token: write`. Pide un OIDC
-   con audiencia `CACHE_AUDIENCE`, llama `POST /v1/session` y exporta:
-   - Turbo: `TURBO_API=<url del Worker>`, `TURBO_TOKEN=<token>`, `TURBO_TEAM=<nombre del repo>`
-     (turbo exige un team; el Worker lo ignora).
-   - sccache: `RUSTC_WRAPPER=sccache`, `SCCACHE_WEBDAV_ENDPOINT=<url>/dav`,
-     `SCCACHE_WEBDAV_TOKEN=<token>`, `CARGO_INCREMENTAL=0`.
-2. **Sandbox de Boat**: guarda una llave `sk_...` del repo como `CI_CACHE_SANDBOX_KEY` y la
-   URL como `CI_CACHE_URL`; pide la sesión con `{"branch": "<rama de git>"}` y exporta las
-   mismas variables.
-3. Para que sccache acierte entre sandbox y CI, ambos deben compilar en la misma ruta
-   (`/home/user/<repo>`, la de los sandboxes de Boat).
+### CI de GitHub Actions: `setup/action.yml`
+
+```yaml
+permissions:
+  contents: read
+  id-token: write          # para pedir el OIDC de GitHub
+
+jobs:
+  build:
+    runs-on: boat-large
+    steps:
+      - uses: actions/checkout@v5
+      - id: cache
+        uses: OmarAlex24/ci-cache/setup@<sha>
+        with:
+          url: https://ci-cache.<cuenta>.workers.dev
+          mount-workdir: "true"   # compila en /home/user/<repo>, como los sandboxes
+      - working-directory: ${{ steps.cache.outputs.workdir }}
+        run: |
+          pnpm turbo run build
+          cargo build --locked
+          sccache --show-stats
+```
+
+La acción pide el OIDC (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`) con la audiencia
+`audience` (default `ci-cache`), llama `POST /v1/session`, enmascara los tokens
+(`::add-mask::`) y exporta:
+
+- `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM` (= nombre del repo; turbo exige un team y el
+  Worker lo ignora). Con nivel `main-ro` también `TURBO_CACHE=local:rw,remote:r`, porque
+  ante un 403 turbo apaga la caché remota del run entero.
+- Si hay Rust (`sccache: auto` busca un `Cargo.toml`): instala sccache fijado por versión
+  y SHA-256 (0.19.0 por defecto, x86_64 y aarch64; otra versión exige `sccache-sha256`) y
+  exporta `RUSTC_WRAPPER=sccache`, `SCCACHE_WEBDAV_ENDPOINT=<url>/dav`,
+  `SCCACHE_WEBDAV_TOKEN` y `CARGO_INCREMENTAL=0`.
+- `mount-workdir: "true"` monta el checkout con `sudo mount --bind "$GITHUB_WORKSPACE"
+  /home/user/<repo>` (la ruta donde clonan los sandboxes de Boat) para que las llaves de
+  sccache coincidan; el output `workdir` dice dónde compilar.
+- Outputs: `tier`, `branch`, `expires-at`, `workdir`.
+- Después imprime la huella de caché (`scripts/cache-fingerprint.sh`; `fingerprint: "false"`
+  para omitirla): compárala con la del sandbox para ver por qué no acierta.
+
+### Sandbox de Boat: `scripts/ci-cache-env.sh`
+
+```sh
+# Una vez por repo: node scripts/new-key.mjs sandbox <repoId> <owner/repo> boat
+# y guarda la llave en los secretos del sandbox como CI_CACHE_SANDBOX_KEY.
+export CI_CACHE_URL=https://ci-cache.<cuenta>.workers.dev
+cd /home/user/<repo>
+bash ci-cache-env.sh            # toma la rama de git; CI_CACHE_BRANCH para otra
+source ~/.ci-cache.env
+```
+
+Escribe en `~/.ci-cache.env` (permisos 600) `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM`,
+`SCCACHE_WEBDAV_ENDPOINT`, `SCCACHE_WEBDAV_TOKEN`, `CARGO_INCREMENTAL=0` y, si sccache
+está instalado, `RUSTC_WRAPPER=sccache`; reinicia el servidor de sccache para que tome el
+token nuevo. Una llave de sandbox siempre da nivel `rama`. El token dura 6 h: vuelve a
+correr el script si la sesión del agente dura más.
+
+Para que sccache acierte entre sandbox y CI, ambos deben compilar en la misma ruta
+(`/home/user/<repo>`), con el mismo toolchain y las mismas banderas.
 
 ## Desarrollo
 
@@ -237,14 +287,20 @@ pnpm install
 cp .dev.vars.example .dev.vars      # pon un SESSION_SECRET
 pnpm dev                            # wrangler dev con R2 local
 pnpm check                          # typecheck + oxlint + vitest (Workers runtime, R2 local)
-pnpm e2e                            # turbo 2.11.10 y sccache reales contra wrangler dev
+pnpm e2e                            # turbo 2.11.10, sccache, ci-cache-env.sh y setup.sh reales
 pnpm lint:openapi                   # valida openapi.yaml (descarga @redocly/cli)
+pnpm lint:sh                        # shellcheck de los scripts de cliente
 ```
 
 - `pnpm e2e:turbo` y `pnpm e2e:sccache` levantan su propio `wrangler dev` con R2 en un
   directorio temporal y firman tokens de sesión con el `SESSION_SECRET` de `.dev.vars`
   (`scripts/mint-session.mjs`); no hay rutas de solo-desarrollo en el Worker. Para usar uno
   ya levantado: `CI_CACHE_URL=http://127.0.0.1:8787 pnpm e2e:turbo`.
+- `pnpm e2e:sandbox` prueba `ci-cache-env.sh` con una llave de sandbox generada al vuelo
+  (pasada a `wrangler dev` con `--var SANDBOX_KEYS`). `pnpm e2e:setup` prueba
+  `setup/setup.sh` con un servidor que simula el OIDC de GitHub y `/v1/session` (el OIDC
+  real solo existe dentro de Actions) y, si hay Docker, corre en Ubuntu la instalación de
+  sccache por SHA-256 y el `mount --bind`.
 - Analytics Engine no se puede consultar en local: la consulta está detrás de la interfaz
   `AnalyticsClient` y las pruebas verifican el SQL generado y la forma de las respuestas.
 

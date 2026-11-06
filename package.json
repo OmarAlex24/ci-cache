@@ -15,8 +15,11 @@
     "cf-typegen": "wrangler types --include-env=false",
     "e2e:turbo": "node scripts/e2e/turbo.mjs",
     "e2e:sccache": "node scripts/e2e/sccache.mjs",
-    "e2e": "pnpm e2e:turbo && pnpm e2e:sccache",
-    "lint:openapi": "pnpm --package=@redocly/cli@2.65.0 dlx redocly lint openapi.yaml"
+    "e2e": "pnpm e2e:turbo && pnpm e2e:sccache && pnpm e2e:sandbox && pnpm e2e:setup",
+    "lint:openapi": "pnpm --package=@redocly/cli@2.65.0 dlx redocly lint openapi.yaml",
+    "e2e:sandbox": "node scripts/e2e/sandbox-env.mjs",
+    "e2e:setup": "node scripts/e2e/setup-action.mjs",
+    "lint:sh": "shellcheck setup/setup.sh scripts/ci-cache-env.sh && shellcheck -e SC1091 scripts/cache-fingerprint.sh"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",
