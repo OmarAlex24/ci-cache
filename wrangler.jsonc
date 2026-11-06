@@ -16,6 +16,8 @@
     "MAIN_WRITE_EVENTS": "push",
     "MAIN_REFS": "refs/heads/main,refs/heads/master",
     // Vida del token de sesión, en segundos (6 h).
-    "SESSION_TTL_SECONDS": "21600"
+    "SESSION_TTL_SECONDS": "21600",
+    // Tope por objeto en PUT (100 MB, el tope de cuerpo de un Worker).
+    "MAX_ARTIFACT_BYTES": "104857600"
   }
 }
