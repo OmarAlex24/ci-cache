@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { JWTVerifyGetKey } from "jose";
 
+import { davRoutes } from "./dav/routes.ts";
 import { HttpError, jsonError } from "./errors.ts";
 import { sessionRoutes } from "./session/routes.ts";
 import { turboRoutes } from "./turbo/routes.ts";
@@ -16,6 +17,7 @@ export function createApp(deps: AppDeps) {
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.route("/", sessionRoutes(deps));
   app.route("/", turboRoutes());
+  app.route("/", davRoutes());
 
   app.notFound((c) => jsonError(c, 404, "not_found", "Ruta no encontrada"));
   app.onError((error, c) => {
