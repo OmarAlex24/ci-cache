@@ -130,10 +130,10 @@ describe("WebDAV para sccache", () => {
 
     const own = await dav(pr("feature/st"), "GET", `/dav/${path}`);
     expect(own.status).toBe(200);
-    expect(timings(own)).toEqual(expect.arrayContaining(["session", "r2-own", "total"]));
-    expect(timings(own)).not.toContain("r2-main");
+    // Una rama lee su prefijo y main/ a la vez: las dos lecturas salen en el header.
+    expect(timings(own)).toEqual(expect.arrayContaining(["session", "r2-own", "r2-main", "total"]));
 
-    // Fallo en la rama: lee la rama y luego main/.
+    // Fallo en la rama y en main/.
     const miss = await dav(pr("feature/st-otra"), "GET", `/dav/${path}`);
     expect(miss.status).toBe(404);
     expect(timings(miss)).toEqual(expect.arrayContaining(["session", "r2-own", "r2-main", "total"]));

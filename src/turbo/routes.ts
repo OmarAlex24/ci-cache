@@ -6,7 +6,7 @@ import { recordCacheEvent } from "../metrics/record.ts";
 import { requireSession } from "../session/middleware.ts";
 import { getWithFallback, headWithFallback, readResult, tierLayout, type TierLayout } from "../storage/tiers.ts";
 import { putStreaming, writablePrefix } from "../storage/upload.ts";
-import { timer } from "../timing.ts";
+import { timer, untimed } from "../timing.ts";
 import type { AppEnv } from "../types.ts";
 import type {
   ArtifactInfo,
@@ -85,7 +85,8 @@ export function turboRoutes() {
     const found = await Promise.all(
       unique.map(async (hash): Promise<[string, ArtifactInfo | null]> => {
         if (!HASH.test(hash)) return [hash, null];
-        const hit = await headWithFallback(c.env.CACHE, layout, hash.toLowerCase());
+        // En secuencia: el lote ya va en paralelo y así no duplica las operaciones de R2.
+        const hit = await headWithFallback(c.env.CACHE, layout, hash.toLowerCase(), untimed, false);
         if (!hit) return [hash, null];
         const meta = hit.object.customMetadata ?? {};
         const info: ArtifactInfo = { size: hit.object.size, taskDurationMs: Number(meta[META_DURATION] ?? 0) };
