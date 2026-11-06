@@ -6,7 +6,10 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-15",
   "observability": { "enabled": true },
-  "r2_buckets": [{ "binding": "CACHE", "bucket_name": "ci-cache" }],
+  // Bucket con location hint weur: los runners y sandboxes de Boat están en OVH Francia y
+  // Polonia. El primero (`ci-cache`, sin hint) quedó en WNAM y cada lectura de R2 tardaba
+  // ~180 ms desde Europa. El hint solo se puede dar al crear el bucket.
+  "r2_buckets": [{ "binding": "CACHE", "bucket_name": "ci-cache-weur" }],
   // Debe coincidir con METRICS_DATASET (las consultas de /v1/stats usan ese nombre).
   "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "ci_cache" }],
   "vars": {
