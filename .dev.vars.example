@@ -1,0 +1,4 @@
+# Copia este archivo a .dev.vars para `wrangler dev`. Nunca subas .dev.vars.
+SESSION_SECRET=cambia-esto-por-al-menos-32-caracteres-aleatorios
+# JSON: sha256(llave) -> {repoId, repo, label}. Genera llaves con `node scripts/new-key.mjs sandbox`.
+SANDBOX_KEYS={}

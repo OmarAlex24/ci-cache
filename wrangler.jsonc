@@ -1,0 +1,21 @@
+// Configuración del Worker ci-cache. Los secrets (SESSION_SECRET, SANDBOX_KEYS, ...)
+// no van aquí: se cargan con `wrangler secret put` (ver README).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ci-cache",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "observability": { "enabled": true },
+  "r2_buckets": [{ "binding": "CACHE", "bucket_name": "ci-cache" }],
+  "vars": {
+    // Audiencia que deben traer los tokens OIDC de GitHub Actions.
+    "CACHE_AUDIENCE": "ci-cache",
+    // Dueños (usuarios u organizaciones de GitHub) cuyos repos pueden usar la caché.
+    "ALLOWED_OWNERS": "OmarAlex24",
+    // Eventos que, sobre una ref de MAIN_REFS, escriben en main/.
+    "MAIN_WRITE_EVENTS": "push",
+    "MAIN_REFS": "refs/heads/main,refs/heads/master",
+    // Vida del token de sesión, en segundos (6 h).
+    "SESSION_TTL_SECONDS": "21600"
+  }
+}
