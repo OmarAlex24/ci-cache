@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { getWithFallback, type TierLayout } from "../src/storage/tiers.ts";
+import { getWithFallback, headWithFallback, type TierLayout } from "../src/storage/tiers.ts";
+import { untimed } from "../src/timing.ts";
 
 const layout: TierLayout = {
   write: "ramas/1/abc/sccache/",
@@ -14,7 +15,12 @@ const layout: TierLayout = {
 function fakeBucket(objects: Record<string, string>) {
   const calls: { key: string; resolve: () => void }[] = [];
   const cancelled: string[] = [];
+  const pendingRead = (key: string) =>
+    new Promise((resolve) => {
+      calls.push({ key, resolve: () => resolve(key in objects ? { key } : null) });
+    });
   const bucket = {
+    head: pendingRead,
     get(key: string) {
       return new Promise((resolve) => {
         calls.push({
@@ -64,5 +70,28 @@ describe("getWithFallback", () => {
     await tick();
     for (const call of calls) call.resolve();
     expect(await result).toBeNull();
+  });
+});
+
+describe("headWithFallback en secuencia (consulta en lote de Turbo)", () => {
+  it("solo pregunta a main/ si la rama no lo tiene", async () => {
+    const { bucket, calls } = fakeBucket({ "main/1/sccache/x": "m" });
+    const result = headWithFallback(bucket, layout, "x", untimed, false);
+    await tick();
+    expect(calls.map((call) => call.key)).toEqual(["ramas/1/abc/sccache/x"]);
+    calls[0]!.resolve();
+    await tick();
+    expect(calls.map((call) => call.key)).toEqual(["ramas/1/abc/sccache/x", "main/1/sccache/x"]);
+    calls[1]!.resolve();
+    expect((await result)?.source).toBe("main");
+  });
+
+  it("con acierto en la rama hace una sola operación", async () => {
+    const { bucket, calls } = fakeBucket({ "ramas/1/abc/sccache/x": "r" });
+    const result = headWithFallback(bucket, layout, "x", untimed, false);
+    await tick();
+    calls[0]!.resolve();
+    expect((await result)?.source).toBe("own");
+    expect(calls).toHaveLength(1);
   });
 });

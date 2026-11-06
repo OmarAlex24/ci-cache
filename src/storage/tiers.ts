@@ -61,7 +61,15 @@ async function firstInOrder<T>(
   layout: TierLayout,
   read: (prefix: string, source: ReadSource) => Promise<T | null>,
   release: (value: T) => void,
+  concurrent = true,
 ): Promise<{ object: T; source: ReadSource } | null> {
+  if (!concurrent) {
+    for (const { prefix, source } of layout.read) {
+      const object = await read(prefix, source);
+      if (object) return { object, source };
+    }
+    return null;
+  }
   const pending = layout.read.map(({ prefix, source }) => ({ source, result: read(prefix, source) }));
   let index = 0;
   try {
@@ -96,16 +104,22 @@ export function getWithFallback(
   );
 }
 
-/** HEAD con fallback. */
+/**
+ * HEAD con fallback. `concurrent: false` lee main/ solo si la rama no lo tiene: para la
+ * consulta en lote de Turbo, que ya lanza cientos de HEAD en paralelo y no gana nada con
+ * duplicar las operaciones de R2 (cuentan contra el tope de subpeticiones del Worker).
+ */
 export function headWithFallback(
   bucket: R2Bucket,
   layout: TierLayout,
   name: string,
   time: Timer = untimed,
+  concurrent = true,
 ): Promise<{ object: R2Object; source: ReadSource } | null> {
   return firstInOrder(
     layout,
     (prefix, source) => time(`r2-${source}`, () => bucket.head(prefix + name)),
     () => undefined,
+    concurrent,
   );
 }
