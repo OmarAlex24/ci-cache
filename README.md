@@ -102,7 +102,9 @@ sccache solo usa estos verbos, y son los únicos que implementa el Worker:
 | `PUT` | `/dav/<a>/<b>/<c>/<hash>` | guardar un objeto compilado |
 
 `MKCOL` solo aparece si `PROPFIND` dice que el directorio no existe; como R2 no tiene
-directorios, el Worker responde que todos existen y sccache nunca lo manda. Cualquier
+directorios, el Worker responde que todos existen y sccache nunca lo manda. Con
+`SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true` (lo exportan la acción y `ci-cache-env.sh`)
+sccache tampoco manda el `PROPFIND`: cada escritura es un solo `PUT`. Cualquier
 otro verbo responde 405 y `PROPFIND` con `Depth` distinto de 0 responde 403 (no hay
 listados). Si el endpoint termina en `/`, sccache manda `/dav//...`; el Worker lo tolera.
 
@@ -269,7 +271,8 @@ La acción pide el OIDC (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`) con la audienc
 - Si hay Rust (`sccache: auto` busca un `Cargo.toml`): instala sccache fijado por versión
   y SHA-256 (0.19.0 por defecto, x86_64 y aarch64; otra versión exige `sccache-sha256`) y
   exporta `RUSTC_WRAPPER=sccache`, `SCCACHE_WEBDAV_ENDPOINT=<url>/dav`,
-  `SCCACHE_WEBDAV_TOKEN` y `CARGO_INCREMENTAL=0`.
+  `SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true` (sin el `PROPFIND`
+  previo a cada escritura) y `CARGO_INCREMENTAL=0`.
 - `mount-workdir: "true"` monta el checkout con `sudo mount --bind "$GITHUB_WORKSPACE"
   /home/user/<repo>` (la ruta donde clonan los sandboxes de Boat) para que las llaves de
   sccache coincidan; el output `workdir` dice dónde compilar.
@@ -289,7 +292,8 @@ source ~/.ci-cache.env
 ```
 
 Escribe en `~/.ci-cache.env` (permisos 600) `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM`,
-`SCCACHE_WEBDAV_ENDPOINT`, `SCCACHE_WEBDAV_TOKEN`, `CARGO_INCREMENTAL=0` y, si sccache
+`SCCACHE_WEBDAV_ENDPOINT`, `SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true`,
+`CARGO_INCREMENTAL=0` y, si sccache
 está instalado, `RUSTC_WRAPPER=sccache`; reinicia el servidor de sccache para que tome el
 token nuevo. Una llave de sandbox siempre da nivel `rama`. El token dura 6 h: vuelve a
 correr el script si la sesión del agente dura más.

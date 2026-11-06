@@ -124,6 +124,8 @@ if [[ $want_sccache == true ]]; then
     echo "RUSTC_WRAPPER=sccache"
     echo "SCCACHE_WEBDAV_ENDPOINT=$url/dav"
     echo "SCCACHE_WEBDAV_TOKEN=$token"
+    # R2 no tiene directorios: sin esto sccache manda un PROPFIND antes de cada PUT.
+    echo "SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true"
     # sccache no cachea compilaciones incrementales.
     echo "CARGO_INCREMENTAL=0"
   } >>"$GITHUB_ENV"
