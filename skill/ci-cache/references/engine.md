@@ -1,0 +1,181 @@
+# The engine: what exists and what it exports
+
+The contract is the engine repo: `~/dev/ci-cache` (`OmarAlex24/ci-cache`,
+private). Read its `README.md` (Spanish) and `openapi.yaml` when this page
+and the code disagree. The code wins.
+
+## Contents
+- Endpoints
+- Tiers and identities
+- The setup action (CI side)
+- The sandbox script
+- Keys and secrets the Worker holds
+- Limits and failure modes
+- Who can use it
+
+## Endpoints
+
+Base URL: `https://ci-cache.omarespinosafernandez.workers.dev`.
+
+| Endpoint | Credential | What it does |
+| --- | --- | --- |
+| `GET /health` | none | liveness check |
+| `POST /v1/session` | GitHub OIDC (audience `ci-cache`) or `sk_…` with `{"branch": "<name>"}` | issues the session token (6 h): `token`, `expiresAt`, `repoId`, `repo`, `tier`, `branch`, `kind` |
+| `GET /v8/artifacts/status` | session | `{"status":"enabled"}` |
+| `GET`/`HEAD`/`PUT /v8/artifacts/{hash}` | session | Turbo artifacts |
+| `POST /v8/artifacts` | session | batch lookup (up to 1000 hashes) |
+| `POST /v8/artifacts/events` | session | Turbo events (validated, then dropped) |
+| `GET`/`PUT`/`PROPFIND /dav/…` | session | WebDAV for sccache (PROPFIND only with `Depth: 0`) |
+| `GET /v1/stats?repo=<id>&range=<r>` | `rk_…` | hits, misses, bytes and time saved, totals plus `byTier`, `byKind`, `byProtocol` |
+| `GET /v1/stats/branches?repo=<id>&range=<r>` | `rk_…` | per branch: `sandboxWrites`, `ciReads`, `ciHits`, `ciHitsOnSandboxObjects`, `reuseAlert` |
+
+- `repo` is the **numeric** GitHub repository id:
+  `gh api repos/O/R --jq .id`.
+- `range` is one of `1h`, `24h`, `7d` (the default), `30d` or `90d`.
+  Analytics Engine keeps data for 3 months.
+- Every response carries `Server-Timing`: `session`, `r2-own`, `r2-main`,
+  `r2-put` and `total`. To split network time from Worker time and R2 time,
+  run `curl -w '%{time_starttransfer} %header{server-timing}'`.
+
+## Tiers and identities
+
+The R2 layout is `main/<repoId>/{turbo,sccache}/…` and
+`ramas/<repoId>/<branchKey>/{turbo,sccache}/…`, where `branchKey` is the
+first 16 hex characters of `sha256(branch)`.
+
+The Worker decides the tier in this order (`src/session/policy.ts`):
+
+1. An event in `MAIN_WRITE_EVENTS` (`push`) on a ref in `MAIN_REFS` (`main`
+   or `master`) → `main`.
+2. An OIDC token with a `head_ref` (`pull_request`, `pull_request_target`)
+   → `rama`, on branch `head_ref`.
+3. Any other event on a main ref (`schedule`, `workflow_dispatch`) →
+   `main-ro`. It reads `main/` and every write gets a 403.
+4. Any other ref (a push to a branch, a tag) → `rama`, on the ref name.
+
+A sandbox key is **always** `rama`, even on a branch named `main`.
+
+So a PR and a sandbox share objects only when **the sandbox's branch name
+equals the PR's head branch name**. Reads fall back to `main/`. A branch
+read fetches its own prefix and `main/` concurrently, and keeps the first
+one that exists.
+
+Metrics give each read one of these results: `hit` (own prefix),
+`hit-main` (a branch served from `main/`), `miss` or `write`. Each object
+records who wrote it (`writer-kind`: `ci` or `sandbox`), and that is how
+`ciHitsOnSandboxObjects` is computed.
+
+## The setup action (CI side)
+
+`OmarAlex24/ci-cache/setup@<sha>`. Pin a full commit SHA; the current one
+is `c8972d60665c09e92455a710e406308f9e1bcbbd`. It is a composite action that
+runs `setup/setup.sh`, then `scripts/cache-fingerprint.sh`.
+
+The job needs `permissions: id-token: write`. Without it, the action fails
+with "no hay token OIDC".
+
+**Inputs**
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `url` | required | Worker URL, no trailing slash |
+| `audience` | `ci-cache` | OIDC audience; must equal the Worker's `CACHE_AUDIENCE` |
+| `sccache` | `auto` | `auto` installs it if a `Cargo.toml` is found within depth 3 (outside `node_modules` and `target`); `true` or `false` force it |
+| `sccache-version` | `0.19.0` | any other version needs `sccache-sha256` |
+| `sccache-sha256` | pinned for 0.19.0 (x86_64, aarch64) | tarball SHA-256 |
+| `mount-workdir` | `"false"` | `"true"` runs `sudo mount --bind $GITHUB_WORKSPACE /home/user/<repo>`; it fails if that directory exists and is not empty |
+| `fingerprint` | `"true"` | prints the cache fingerprint after the session |
+
+**Outputs:** `tier`, `branch`, `expires-at` and `workdir`. `workdir` is
+`/home/user/<repo>` with the mount, otherwise `GITHUB_WORKSPACE`.
+
+**Exported to `$GITHUB_ENV`**
+
+- Always: `TURBO_API` (the Worker URL), `TURBO_TOKEN` (the session token,
+  masked) and `TURBO_TEAM` (the repo name; turbo requires a team and the
+  Worker ignores it).
+- On `main-ro` only: `TURBO_CACHE=local:rw,remote:r`. A 403 makes turbo turn
+  off the remote cache for the rest of the run.
+- With sccache, **only if `sccache --start-server` works against the Worker**:
+  `RUSTC_WRAPPER=sccache`, `SCCACHE_WEBDAV_ENDPOINT=<url>/dav`,
+  `SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true` and
+  `CARGO_INCREMENTAL=0`. If the server fails to start, the action emits a
+  `::warning::` and the run compiles without sccache.
+- It adds the sccache directory to `$GITHUB_PATH`.
+
+The action does **not** export `CI_WORKDIR`. Workflows export it themselves
+from `steps.<id>.outputs.workdir` (see `rust.md`).
+
+The log prints `ci-cache: sesión <tier> (rama <branch>) hasta <expiry>`.
+Use that line to check the tier.
+
+## The sandbox script
+
+`scripts/ci-cache-env.sh` in the engine repo. Inputs are `CI_CACHE_URL` and
+`CI_CACHE_SANDBOX_KEY` (it must start with `sk_`). Two optional variables
+change its defaults:
+- `CI_CACHE_BRANCH`: the branch to use. The default is the current git
+  branch, and the script fails on a detached HEAD.
+- `CI_CACHE_ENV_FILE`: where to write. The default is `~/.ci-cache.env`.
+
+It sends the key through stdin (`-H @-`), so the key never shows in `ps`.
+
+It writes `~/.ci-cache.env` (mode 600) with these exports:
+- `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM`;
+- `SCCACHE_WEBDAV_ENDPOINT`, `SCCACHE_WEBDAV_TOKEN`,
+  `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true`;
+- `CARGO_INCREMENTAL=0`;
+- `RUSTC_WRAPPER=sccache`, only if `sccache` is on `PATH`.
+
+Then it stops the sccache server, so the next build picks up the new token.
+It never prints the key or the token.
+
+## Keys and secrets the Worker holds
+
+| Secret | Content |
+| --- | --- |
+| `SESSION_SECRET` | HMAC key for session tokens |
+| `SANDBOX_KEYS` | JSON `{"<sha256 of sk_ key>": {"repoId", "repo", "label"}}`: **every** repo's entries |
+| `STATS_KEYS` | JSON `{"<sha256 of rk_ key>": {"label", "repoIds"?}}` |
+| `CF_ACCOUNT_ID`, `CF_API_TOKEN` | Analytics Engine SQL API |
+
+`node scripts/new-key.mjs sandbox <repoId> <owner/repo> [label]` and
+`node scripts/new-key.mjs stats <label> [repoId,…]` print the key **once**,
+followed by the hash entry. Don't run them in a terminal someone else
+reads: use `scripts/mint-sandbox-key.sh` from this skill (see `keys.md`).
+
+## Limits and failure modes
+
+- **100 MB per object** (the Worker's body limit). Turbo skips a bigger
+  artifact and goes on.
+- A `PUT` needs `Content-Length`, or it gets a 411.
+- Turbo hashes are 1–128 hex characters. sccache path segments are
+  `[A-Za-z0-9._-]`, at most 512 characters in total.
+- R2 lifecycle counts from **upload**, not last use. A hot `main/` object
+  still disappears at 30 days: the next main run misses it once and writes
+  it again.
+- If the Worker is down when the session is requested, the action step
+  fails. `continue-on-error` turns that into an uncached run.
+- If the Worker fails between the session and the first rustc, the
+  sccache server is already up (the action started it). Each later failed
+  read counts as a miss and compiles locally.
+
+## Who can use it
+
+- `ALLOWED_OWNERS` is `OmarAlex24`. A repository owned by another user or
+  org gets a 403 from `/v1/session` until the Worker's vars change, which
+  needs a deploy and Omar's OK.
+- **Fork PRs** get no OIDC token. Gate the job on same-repo PRs, or accept
+  that those runs are uncached:
+
+  ```yaml
+  if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+  ```
+- The action lives in a private repository. Other repositories can use it
+  only because `OmarAlex24/ci-cache` allows it: `gh api
+  repos/OmarAlex24/ci-cache/actions/permissions/access` returns
+  `access_level: user`, which lets any repo owned by `OmarAlex24` use it.
+  A repo owned by anyone else can't use a private, user-owned action at
+  all. The action would have to become public or move to that org, and
+  `ALLOWED_OWNERS` would have to change too. If a repo fails at "Set up
+  job" with "unable to resolve action", check that setting first.
