@@ -175,6 +175,7 @@ reads: use `scripts/mint-sandbox-key.sh` from this skill (see `keys.md`).
   only because `OmarAlex24/ci-cache` allows it: `gh api
   repos/OmarAlex24/ci-cache/actions/permissions/access` returns
   `access_level: user`, which lets any repo owned by `OmarAlex24` use it.
-  An org repo would need `organization`, plus `ALLOWED_OWNERS`. If a repo
-  fails at "Set up job" with "unable to resolve action", check that
-  setting first.
+  A repo owned by anyone else can't use a private, user-owned action at
+  all. The action would have to become public or move to that org, and
+  `ALLOWED_OWNERS` would have to change too. If a repo fails at "Set up
+  job" with "unable to resolve action", check that setting first.

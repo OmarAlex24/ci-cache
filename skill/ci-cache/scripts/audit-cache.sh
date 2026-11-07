@@ -96,7 +96,8 @@ fi
 
 echo
 echo "== checks"
-for f in "${workflows[@]}"; do
+# `${a[@]+...}`: bash 3.2 (macOS /bin/bash) treats an empty array as unset under set -u.
+for f in ${workflows[@]+"${workflows[@]}"}; do
   rel=${f#"$dir"/}
   rc=$(grep -n 'Swatinem/rust-cache' "$f" | head -1 | cut -d: -f1)
   cc=$(grep -n 'OmarAlex24/ci-cache/setup' "$f" | head -1 | cut -d: -f1)
@@ -109,7 +110,7 @@ for f in "${workflows[@]}"; do
   if [[ -n $cc ]] && ! grep -q -E 'id-token: *write' "$f"; then
     warn "$rel: uses ci-cache but grants no id-token: write"
   fi
-  if [[ -n $cc ]] && ! grep -q -E 'mount-workdir: *"?true' "$f" && [[ " ${found[*]} " == *" rust "* ]]; then
+  if [[ -n $cc ]] && ! grep -q -E 'mount-workdir: *"?true' "$f" && [[ " ${found[*]-} " == *" rust "* ]]; then
     warn "$rel: ci-cache without mount-workdir: CI builds at another path than the sandboxes"
   fi
   if grep -q -E 'TURBO_TOKEN: *\$\{\{ *secrets\.' "$f"; then
@@ -119,7 +120,7 @@ for f in "${workflows[@]}"; do
     warn "$rel: docker build with a cache and no visible uncached retry (ignore-error covers only the export)"
   fi
 done
-[[ " ${found[*]} " == *" rust "* ]] && ! wgrep 'OmarAlex24/ci-cache/setup' >/dev/null && note "Rust present and no ci-cache step yet: start with references/rust.md"
+[[ " ${found[*]-} " == *" rust "* ]] && ! wgrep 'OmarAlex24/ci-cache/setup' >/dev/null && note "Rust present and no ci-cache step yet: start with references/rust.md"
 
 if [[ -n $repo ]]; then
   echo
