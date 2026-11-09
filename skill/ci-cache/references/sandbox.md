@@ -28,10 +28,10 @@ Measured on 2026-11-09 (Boat CLI 1.0.92, a `default` sandbox):
 - The image has cargo and rustc (rustup's `stable`, in `/usr/local/cargo`),
   bun, pnpm, node, jq, curl, `sha256sum` and git. **It has no sccache.**
   `~/.local/bin` comes first on `PATH`.
-- **No startup hook.** Nothing runs when a sandbox starts. `boat new
-  --setup-file` runs a script, but only on sandboxes created from the CLI
-  with that flag, not on the ones agents and the dashboard start. The repo's
-  agent guide is the hook (below).
+- **No startup hook.** Nothing in an environment runs when a sandbox
+  starts. `boat new --setup-file` runs a script, but it's a flag on one
+  CLI create. Nobody has checked whether sandboxes started from the
+  dashboard can get one. The repo's agent guide is the hook (below).
 - Environment variables (`set-var`) reach every shell and `boat exec`.
 - Secret files (`set-file <env> <path>`) land at `/home/user/<path>`. Boat
   creates the parent directories and writes the file **mode 644**, so run
