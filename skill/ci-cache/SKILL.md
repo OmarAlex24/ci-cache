@@ -22,11 +22,13 @@ getting that parity and proving it with numbers.
 | --- | --- |
 | `scripts/audit-cache.sh` | Stack detection, cache steps in the workflows, Actions cache usage vs the 10 GB limit. Run first. |
 | `scripts/mint-sandbox-key.sh` | Mint a sandbox key and merge it into the local key files without printing it. |
+| `scripts/connect-sandbox.sh` | Wire a repo's Boat environment: both variables from stdin, `ci-cache-env.sh` and the sccache installer as secret files, `boat env upgrade`. Names only, `--dry-run`. |
 | `scripts/fingerprint-diff.sh` | Diff the sandbox and CI cache fingerprints; flags the lines that break keys. |
 | `scripts/cache-stats.sh` | Read `/v1/stats` and `/v1/stats/branches` (sandbox→CI reuse per branch). |
 | `scripts/job-durations.sh` | First-attempt job durations from the jobs API, with the median. |
 | `scripts/machine-class.sh` | iowait and steal of a run from boated-ci's machine samples: classifies the run as `fast` or `slow-io`. |
 | `templates/cached-job.yml` | One job wired for Rust + Turbo + Docker (actionlint-clean). Start from it. |
+| `templates/sandbox-install-sccache.sh` | Installs CI's sccache (0.19.0, SHA-256 checked) in a sandbox; `connect-sandbox.sh` delivers it. |
 | `references/*.md` | Details; each step below says which one to read. |
 
 The scripts need bash, `jq` and `gh`; `mint-sandbox-key.sh` also needs `node`
@@ -64,8 +66,11 @@ Full detail, with inputs, outputs and every exported variable:
 
 1. **Never print a secret.** Sandbox keys (`sk_`), stats keys (`rk_`) and
    session tokens never go to a terminal, a log, a PR or this skill.
-   - Never run `boat env info` or `boat env list`: they print variable
-     values. A key leaked twice this way and had to be rotated.
+   - `boat env info`, `boat env list` and the answer of `boat env new`
+     print variable values. A key leaked twice this way and had to be
+     rotated. Read them only as `--json` piped into a `jq` filter that
+     emits names, then `sed`-redact `sk_`/`rk_`. `connect-sandbox.sh` does
+     this for you.
    - Set variables with `boat env set-var <env> NAME`, reading the value
      from stdin.
    - In traces, test a secret with `${VAR:+set}`, never with its value.
@@ -153,12 +158,28 @@ Then follow the guide for each stack:
 `templates/cached-job.yml` puts all three together.
 
 ### 4. Sandbox wiring
-In the repo's Boat environment, set `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY`
-(the key from stdin). Copy the CI values of every variable that enters the
-keys, for example `RUSTFLAGS` and `CARGO_TERM_COLOR`. Install the same
-sccache (0.19.0). In the sandbox, run `bash ci-cache-env.sh` and then
-`source ~/.ci-cache.env`. Run it again after each branch switch, and once the
-6 h token expires. → `references/sandbox.md`.
+Boat has no startup hook, so a sandbox writes to the cache only if its agent
+opens a session. Wire both ends:
+1. **The environment.** Run `scripts/connect-sandbox.sh <owner/repo> [env]`,
+   first with `--dry-run`. It sets `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY`
+   (from stdin), delivers `~/.ci-cache/ci-cache-env.sh` and
+   `~/.ci-cache/install-sccache.sh` (the image has no sccache), and runs
+   `boat env upgrade`. A repo without an environment needs `--create-env`.
+   Never use `base`: CI runners start from it.
+2. **Parity.** Copy the CI values of every variable that enters the keys
+   with `set-var`, for example `RUSTFLAGS` and `CARGO_TERM_COLOR`.
+3. **The agent guide.** In the repo's `AGENTS.md`/`CLAUDE.md`, a few lines:
+   - in a Boat sandbox (`BOAT_ID` set and `~/.ci-cache/` present), run
+     `bash ~/.ci-cache/install-sccache.sh` (Rust only), then
+     `bash ~/.ci-cache/ci-cache-env.sh`;
+   - `source ~/.ci-cache.env` in every shell that builds;
+   - run it again after a branch switch and every 6 h;
+   - rebase onto `origin/main` before the final build.
+4. **Verify with one sandbox start**: build, rebuild after `cargo clean`,
+   and read `/v1/stats/branches`.
+
+Connecting a repo to sandboxes in Boat's GitHub settings, so that
+`boat env add-repo` works, is Omar's step. → `references/sandbox.md`.
 
 ### 5. Verify
 - Run `scripts/fingerprint-diff.sh` on a sandbox fingerprint and a CI run.
@@ -246,6 +267,10 @@ sccache (0.19.0). In the sandbox, run `bash ci-cache-env.sh` and then
 
 ## Not built yet
 
+- A Boat startup hook. Agents open the session because the repo's agent
+  guide says so; nothing runs it for them.
+- sccache installed by `ci-cache-env.sh` itself. Today the skill's
+  installer is a second secret file next to it.
 - Replay of Rust test results (a design exists).
 - A fingerprint diff that explains a miss on the server side.
 - Go through `GOCACHEPROG`.
