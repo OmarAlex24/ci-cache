@@ -38,6 +38,9 @@ From the first rollout (klav, a Rust + extension + Docker monorepo):
   - `mint-sandbox-key.sh`: mints an `sk_` key with the engine's
     `new-key.mjs` and merges it into the local key files, without printing
     it.
+  - `connect-sandbox.sh`: wires a repo's Boat environment (both
+    variables from stdin, the session script and an sccache installer as
+    secret files, `boat env upgrade`), printing names only.
   - `fingerprint-diff.sh`: diffs a sandbox fingerprint against a CI run's
     log and marks every difference that breaks cache keys.
   - `cache-stats.sh`: `/v1/stats` and `/v1/stats/branches`, with the
@@ -45,8 +48,9 @@ From the first rollout (klav, a Rust + extension + Docker monorepo):
   - `job-durations.sh`: first-attempt job durations and the median.
   - `machine-class.sh`: iowait and steal per run from boated-ci's machine
     samples (fast vs slow-io machines).
-- **A template**: `templates/cached-job.yml`, one actionlint-clean job wired
-  for all three stacks.
+- **Templates**: `templates/cached-job.yml`, one actionlint-clean job wired
+  for all three stacks, and `templates/sandbox-install-sccache.sh`, the
+  pinned sccache installer delivered into sandboxes.
 - **References**:
   - `engine.md`: endpoints, tiers, action inputs and outputs, exported
     variables;

@@ -101,8 +101,8 @@ for `cache-stats.sh`. Mint a new one only for a new consumer.
 1. `mint-sandbox-key.sh <repo> --rotate`: a new key, and the old hash
    removed from the map.
 2. Upload the map (above). The old key stops working at that moment.
-3. Update the Boat environment (`sandbox.md`), then
-   `boat env upgrade <env>`.
+3. Update the Boat environment with `scripts/connect-sandbox.sh <repo>`.
+   It sets the key again and runs `boat env upgrade <env>` (`sandbox.md`).
 4. Sessions minted with the old key stay valid until they expire (6 h at
    most). There is no revocation list. If that matters, rotate
    `SESSION_SECRET`, which invalidates **every** session, CI included, for
