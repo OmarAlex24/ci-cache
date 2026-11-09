@@ -8,6 +8,7 @@ used, and the traps it found.
 - What to measure
 - Machine classes
 - How many runs, and which
+- How often a gain applies
 - Timing inside a task
 - Reading the cache's own numbers
 - Spending starts on measurement
@@ -40,7 +41,7 @@ Boat machines come in two classes that dominate the variance:
 | Class | iowait over the job | Effect seen in klav |
 | --- | --- | --- |
 | fast | ~2 % | job ~333–434 s |
-| slow-io | 15–23 % | the same work at 536–702 s; clippy 306 s instead of ~190 s; `docker run` checks at 10–60 s each |
+| slow-io | 15–23 % | the same work at 536–702 s; clippy 306 s instead of ~190 s; `docker run` checks at 10–60 s each; a cached `docker` task at 107–252 s instead of 18–33 s (iowait 18–25 %) |
 
 Steal stayed below 1 % in klav's runs, but check it anyway. Over ~8 %, the
 run is noise.
@@ -65,12 +66,27 @@ medians **within** a class. Report the class with each number.
   - the first `main` run after onboarding, which fills `main/`;
   - the first run after a `prefix-key` bump;
   - the first write to a BuildKit scope;
-  - a PR that changes `Cargo.lock` or a core crate.
+  - a PR that changes `Cargo.lock` or a core crate;
+  - a toolchain bump: every crate misses once, on main, on each branch and
+    in every sandbox;
+  - the first `docker` run of a stacked PR after its base PR changed a
+    Dockerfile: it reads main's BuildKit cache, not its parent's
+    (`docker.md`).
 - **Separate PRs that touch the cached code** (a Rust change misses its own
   crates and the crates that depend on them) from PRs that don't (docs, CI,
   the extension).
 - **Run variants one after another, not in parallel.** Parallel runs share
   hosts and inherit correlated noise.
+
+## How often a gain applies
+
+A run shows what a change saves when it applies, not how often it applies.
+For a change to what invalidates a cache key (a narrower Docker context, a
+new `.dockerignore` entry), replay history before claiming a gain: over
+the default branch's last N commits, count how many changed the old inputs
+and how many change the new ones. klav #240 looked like 149–331 s down to
+21 s per change, but it removed 7 of 45 recompiles on main's last 80
+commits. `docker.md` has the sketch.
 
 ## Timing inside a task
 

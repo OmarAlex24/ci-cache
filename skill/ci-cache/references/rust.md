@@ -10,6 +10,7 @@ breaking it.
 - The path: bind mount and CI_WORKDIR
 - The environment: make the sandbox match CI
 - The toolchain
+- Reuse the image's toolchain under the pinned name
 - rust-cache: order, prefix-key, ~/.cargo only
 - The job snippet
 - Shared target/ and the build-directory lock
@@ -108,13 +109,76 @@ space. That's fine, but a sandbox build won't feed it.
   (`channel = "1.97.1"`). With `channel = "stable"`, both sides resolve
   stable on their own. On a Rust release day the sandbox and CI can run
   different compilers, and every key differs.
-  - klav still floats `stable`. It works while the Boat images agree, but
-    pinning removes the risk.
+  - klav pins 1.97.1 since #241 (merged 2026-11-09). That was the release
+    Boat's image shipped as `stable`, while upstream stable was 1.99.1.
+- **Pin the release the runner image ships.** CI downloads any other one on
+  every run, until the image catches up. Read it from the `rustc` line of
+  the toolchain step in a CI log.
+- **A bump is a PR of its own**, and the next builds are cold once: every
+  crate misses on the first runs on main, on each branch and in every
+  sandbox.
+- **Rename the image's `stable` before any rustup call** (next section).
+  Pinning the image's own release still downloads it otherwise.
 - Use the image's rustup. Don't `rustup self update` in CI.
 - Same target triple. Extra targets (`wasm32-unknown-unknown`) are fine:
   each target has its own keys.
 - The same sccache version on both sides (0.19.0). The action installs
   0.19.0; in the sandbox, install that version.
+- **A re-downloaded or renamed toolchain doesn't make the cache cold.**
+  sccache 0.19's keys don't include the toolchain's path. In klav #241,
+  the same release downloaded again, then renamed, got 100 % Rust hits
+  (about 2,250 requests per run, 0 misses).
+
+## Reuse the image's toolchain under the pinned name
+
+rustup knows toolchains only by their directory name. Boat's image ships
+its release as `stable-x86_64-unknown-linux-gnu`. A pin of that same
+release looks for `1.97.1-x86_64-unknown-linux-gnu`, doesn't find it, and
+downloads it again. In klav that took 150 s and 5.6 s (n=2, two Boat runs
+twelve minutes apart), against 2–3 s for the step before the pin.
+
+The fix: when the image's `rustc -V` reports exactly the pin, rename its
+toolchain to the pinned name and leave `stable` as a symlink to it.
+- **Run it before any rustup command.** In a directory with
+  `rust-toolchain.toml`, any command that resolves the active toolchain
+  installs the pin when it's missing: `rustup --version` does, and so do
+  the `rustc` and `cargo` proxies. In klav's run 42638338138 the rename
+  came after `rustup --version` and found the pin already downloaded.
+- **Don't ask rustup where its home is.** `rustup show home` doesn't
+  install anything, but reading `RUSTUP_HOME` avoids calling rustup at all.
+- **Touch nothing in any other case.** If the image ships another release,
+  rustup downloads the pin as before, and the step warns so that someone
+  re-pins.
+
+For any Rust repo on Boat, at the top of the toolchain step (from klav's
+`ci.yml`, #241):
+
+```bash
+pin=$(sed -nE 's/^channel *= *"([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' rust-toolchain.toml)
+toolchains="${RUSTUP_HOME:-$HOME/.rustup}/toolchains"
+for stable in "$toolchains"/stable-*; do
+  [ -n "$pin" ] && [ -d "$stable" ] && [ ! -L "$stable" ] || continue
+  pinned="$toolchains/$pin-${stable##*/stable-}"
+  image=$("$stable/bin/rustc" -V 2>/dev/null || true)
+  if [ -e "$pinned" ]; then
+    echo "${pinned##*/} is already installed"
+  elif [[ $image == "rustc $pin "* ]]; then
+    mv "$stable" "$pinned" && ln -s "${pinned##*/}" "$stable" &&
+      echo "The image's stable is rustc $pin: reused as ${pinned##*/}"
+  else
+    echo "::warning::The image's stable is '${image:-unknown}', not the pinned $pin: every run downloads $pin"
+  fi
+done
+rustup toolchain install   # from rust-toolchain.toml: nothing to download after the rename
+```
+
+- **Check it in the log**: `reused as 1.97.1-x86_64-unknown-linux-gnu`,
+  then rustup's `info: using existing install`. In klav the step went back
+  to 2–3 s (runs 42640147924 and 42646410867), with 100 % Rust hits.
+- **Sandboxes don't run this step.** Each sandbox downloads the pin once,
+  the first time `cargo` runs in the repo (`sandbox.md`, `roadmap.md`).
+- **Rejected: `~/.rustup` in the Actions cache.** It's about 600 MB, and
+  the Actions cache delivered 0.7–15 MB/s to Boat on 2026-11-09.
 
 ## rust-cache: order, prefix-key, ~/.cargo only
 
@@ -164,7 +228,9 @@ jobs:
     steps:
       - uses: actions/checkout@<sha>
       - name: "rust: toolchain"
-        run: rustup toolchain install   # from rust-toolchain.toml
+        run: |
+          # first, the rename from "Reuse the image's toolchain under the pinned name"
+          rustup toolchain install   # from rust-toolchain.toml
       - name: "rust: ci-cache"
         id: cache
         continue-on-error: true

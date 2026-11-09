@@ -16,6 +16,9 @@ test (postgres), docker, extension and cargo-deny. Each task shares one
 | #220 | extension: Chromium deps and download in the background; `--no-shell`; dpkg `force-unsafe-io` | `extension` ~636 s → **287 s** at best; `install-deps` 53–232 s → 18 s. pnpm's store can't hard-link across the bind mount (EXDEV). |
 | #227 | docker: retry **any** failed cached build once without the cache | `ignore-error=true` covers only the export; a 5xx while reading the cache would turn the task red. |
 | #228 | cargo-nextest for `test` and `test (postgres)`; `.config/` added to `.dockerignore` | `test` busy-machine median 574 → 366 s. A new root-level config dir had been invalidating the Docker context. |
+| #239 | `CLAUDE.md`: in a Boat sandbox, install sccache, open a session and `source ~/.ci-cache.env` before building | The agent guide is the only startup hook sandboxes have (`sandbox.md`). |
+| #240 | docker: the build stage copies only `Cargo.toml`, `Cargo.lock` and `crates/`, in both Dockerfiles | A change outside `crates/` costs a cached build (21 s) instead of a recompile (149–331 s, n=4, fast machines). But on main's last 80 commits it avoids only 7 of 45 recompiles. The images were proved equal file by file (run 42633937575). |
+| #241 | `rust-toolchain.toml` pins 1.97.1; the toolchain step renames the image's `stable` to the pinned name before any rustup call | Pinning the image's own release still downloaded it: 150 s and 5.6 s. With the rename first, the step is back to 2–3 s. sccache stayed at 100 % throughout. |
 
 ## Numbers
 
@@ -25,6 +28,8 @@ test (postgres), docker, extension and cargo-deny. Each task shares one
 | Rust hit rate, warm main | — | 99.84 % |
 | PR CI reuse of the sandbox's objects | — | 96 % (`ci/cache-r2`: 1302 of 1355) |
 | `docker` task | 406–485 s | 23 s warm |
+| `docker` task, change outside `crates/`, fast machines | 149–331 s (n=4) | 21 s (n=1), after #240 |
+| Toolchain step with the pinned release | 150 s and 5.6 s (pin alone, n=2) | 2–3 s (renamed first, n=2) |
 | `extension` task | ~636 s | 287 s at best |
 
 The variance is mostly the machine class. Fast machines (iowait ~2 %) ran
@@ -43,8 +48,16 @@ the same work.
     own ~353 MB until they expire after 7 days unused.
 - One sandbox key leaked twice through `boat env info`, and was rotated
   each time.
+- One `docker` compile on #241's first run (357 s): a stacked PR reads
+  main's BuildKit cache, which didn't have #240's layout yet.
 
 ## What is left on the critical path
 
 `extension`'s single-worker Playwright e2e (3.5–5.7 min) doesn't depend on
 any cache. That is the next lever, and it's not a caching one.
+
+Smaller items:
+- Copying only klav-server's own crates into the image, with stub
+  manifests, would avoid 22 of main's 45 recompiles instead of 7
+  (`docker.md`).
+- Each sandbox downloads the pinned toolchain once (`roadmap.md`).

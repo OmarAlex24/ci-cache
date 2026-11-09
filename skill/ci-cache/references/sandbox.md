@@ -28,6 +28,13 @@ Measured on 2026-11-09 (Boat CLI 1.0.92, a `default` sandbox):
 - The image has cargo and rustc (rustup's `stable`, in `/usr/local/cargo`),
   bun, pnpm, node, jq, curl, `sha256sum` and git. **It has no sccache.**
   `~/.local/bin` comes first on `PATH`.
+- A repo that pins its toolchain (klav since #241) gets it through rustup
+  the first time `cargo` runs there: **one download per sandbox**, even
+  when the pin is the image's own `stable`. CI renames that toolchain
+  instead (`rust.md`), but sandboxes don't run CI's step. The keys should
+  still match: in CI, a re-downloaded copy of the same release got 100 %
+  hits, since sccache doesn't hash the toolchain's path. Not measured in a
+  sandbox yet.
 - **No startup hook.** Nothing in an environment runs when a sandbox
   starts. `boat new --setup-file` runs a script, but it's a flag on one
   CLI create. Nobody has checked whether sandboxes started from the
@@ -141,12 +148,13 @@ Since nothing runs at startup, the repo's `AGENTS.md`/`CLAUDE.md` tells the
 agent what to run. Keep it to a few lines, in the repo's language. Gate it
 on the sandbox, so it is a no-op on a laptop:
 
-- Rust repo (klav, `CLAUDE.md`):
+- Rust repo (klav, `CLAUDE.md`, #239, merged 2026-11-09):
   ```
   bash ~/.ci-cache/install-sccache.sh && bash ~/.ci-cache/ci-cache-env.sh
   ```
   then `source ~/.ci-cache.env` in every shell that runs cargo. Agent
-  shells don't keep exports between calls.
+  shells don't keep exports between calls. It also says not to override
+  `RUSTFLAGS` or `CARGO_*`: the environment already matches CI.
 - Turbo repo (horizon-stack, `AGENTS.md`): `bash ~/.ci-cache/ci-cache-env.sh`,
   then `source ~/.ci-cache.env` before Turbo. Run tests with
   `TURBO_CACHE=local:rw` when CI does: horizon's tests read files Turbo
