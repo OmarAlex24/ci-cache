@@ -144,7 +144,8 @@ Then follow the guide for each stack:
     task `cd "${CI_WORKDIR:-$GITHUB_WORKSPACE}"`;
   - put rust-cache after the action, with `cache-targets: false` and a new
     `prefix-key`;
-  - pin the toolchain;
+  - pin the toolchain to the release the runner image ships, and rename
+    the image's `stable` to the pinned name before any rustup call;
   - set `SCCACHE_IDLE_TIMEOUT: "0"` and add a stats step at the end.
 - **Turbo** (`references/turbo.md`): delete the Vercel `TURBO_TOKEN` and
   `TURBO_TEAM` from `env:`, check that `TURBO_API` points at the Worker, and
@@ -153,7 +154,9 @@ Then follow the guide for each stack:
   - export the cache runtime with `actions/github-script`;
   - build with `type=gha` (`mode=max`), and retry once without the cache;
   - reuse a binary that is already built, with `--build-context`;
-  - keep CI-only files out of the context with `.dockerignore`.
+  - keep CI-only files out of the context with `.dockerignore`;
+  - before narrowing a `COPY`, count the recompiles it would have saved,
+    and prove that the new image equals the old one.
 
 `templates/cached-job.yml` puts all three together.
 
@@ -211,6 +214,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
       `fingerprint-diff.sh` flags no `KEY` lines against a sandbox.
 - [ ] Rust: rust-cache comes after the action, with `cache-targets: false`
       and a `prefix-key` that no old entry shares.
+- [ ] Rust: the toolchain step logs `reused as <pin>-<host>` and rustup's
+      `using existing install`, not a download.
 - [ ] Turbo: a step after the action prints `TURBO_API` as the Worker URL.
       No Vercel token is left in `env:`.
 - [ ] Docker: a warm run shows the image stages `CACHED`. A build with a
@@ -237,6 +242,10 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 - **Different environments.** Any difference in `RUSTFLAGS` or a `CARGO_*`
   variable (even `CARGO_TERM_COLOR`) between the sandbox and CI misses every
   crate. So does a floating `channel = "stable"` on a Rust release day.
+- **Pinning the image's own release still downloads it.** rustup knows
+  toolchains only by name, so the image's `stable` isn't reused as
+  `1.97.1`: 5.6–150 s per run on Boat. `rustup --version` already installs
+  the pin, so rename before any rustup call (`rust.md`).
 - **Wrong branch.** The sandbox session is per branch. A sandbox on a
   differently named branch, or a stale `~/.ci-cache.env` after
   `git switch`, writes where the PR never reads.
@@ -271,6 +280,9 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
   guide says so; nothing runs it for them.
 - sccache installed by `ci-cache-env.sh` itself. Today the skill's
   installer is a second secret file next to it.
+- The toolchain rename in sandboxes. Each sandbox downloads the pinned
+  release once; `ci-cache-env.sh` could rename the image's `stable` like
+  CI does.
 - Replay of Rust test results (a design exists).
 - A fingerprint diff that explains a miss on the server side.
 - Go through `GOCACHEPROG`.

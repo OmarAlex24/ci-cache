@@ -70,8 +70,27 @@ jobs:
             }
 
       # --- Rust toolchain, then ci-cache, then rust-cache (this order) ---------
+      # rust-toolchain.toml pins the release the image ships as `stable`, and
+      # rustup knows toolchains only by name: rename the image's toolchain to
+      # the pinned name, or rustup downloads the same release again. This goes
+      # before any rustup/rustc/cargo call, since those install the pin.
       - name: "rust: toolchain"
         run: |
+          pin=$(sed -nE 's/^channel *= *"([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' rust-toolchain.toml)
+          toolchains="${RUSTUP_HOME:-$HOME/.rustup}/toolchains"
+          for stable in "$toolchains"/stable-*; do
+            [ -n "$pin" ] && [ -d "$stable" ] && [ ! -L "$stable" ] || continue
+            pinned="$toolchains/$pin-${stable##*/stable-}"
+            image=$("$stable/bin/rustc" -V 2>/dev/null || true)
+            if [ -e "$pinned" ]; then
+              echo "${pinned##*/} is already installed"
+            elif [[ $image == "rustc $pin "* ]]; then
+              mv "$stable" "$pinned" && ln -s "${pinned##*/}" "$stable" &&
+                echo "The image's stable is rustc $pin: reused as ${pinned##*/}"
+            else
+              echo "::warning::The image's stable is '${image:-unknown}', not the pinned $pin: every run downloads $pin"
+            fi
+          done
           rustup toolchain install # from rust-toolchain.toml: pin an exact version there
           rustc --version
           cargo --version

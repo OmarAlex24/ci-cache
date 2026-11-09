@@ -38,6 +38,13 @@ binary when the same binary has already passed. The design:
 - **Temporary Docker credentials**: short-lived credentials so BuildKit
   could read and write the R2 tiers (a registry or S3-style cache) instead
   of the Actions cache, with the same tier rules.
+- **The toolchain rename in `ci-cache-env.sh`**: CI renames the image's
+  `stable` to the pinned name when they are the same release (`rust.md`).
+  Sandboxes don't run that step, so each one downloads the pin once, the
+  first time `cargo` runs in the repo. `ci-cache-env.sh` calls neither
+  rustc nor cargo, so it could do the same rename before the agent's first
+  build. Not tried yet: check that the sandbox user can write the image's
+  toolchains directory.
 - **Sandbox tokens bound to one branch**: today a sandbox key can request a
   session for any branch name of its repo. Binding the key, or the Boat
   sandbox, to one branch would stop a sandbox from writing into another
