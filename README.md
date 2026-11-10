@@ -339,3 +339,8 @@ pnpm lint:sh                        # shellcheck de los scripts de cliente
 Los tipos de la API de Turbo (`src/turbo/spec.ts`) vienen del spec de
 [AdiRishi/turborepo-remote-cache-cloudflare](https://github.com/AdiRishi/turborepo-remote-cache-cloudflare),
 MIT, © 2023 Adishwar Rishi.
+
+## Licencia
+
+ci-cache se distribuye bajo la GNU Affero General Public License v3.0, únicamente esa
+versión (`AGPL-3.0-only`). El texto completo está en [`LICENSE`](LICENSE).
