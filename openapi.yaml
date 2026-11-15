@@ -387,6 +387,35 @@ paths:
         "502": { $ref: "#/components/responses/AnalyticsUnavailable" }
         "503": { $ref: "#/components/responses/MetricsNotConfigured" }
 
+  /v1/stats/repos:
+    get:
+      tags: [métricas]
+      summary: Los repositorios con tráfico en el rango, con sus totales
+      operationId: getRepoStats
+      description: |
+        Para que un frontend no necesite saber los ids de antemano. Dos consultas a la API SQL
+        de Analytics Engine: los totales por repo (con la última petición) y las ramas de
+        nivel `rama`, para contar los `reuseAlert` de cada repo con la misma regla que
+        `/v1/stats/branches`. Una llave con `repoIds` solo ve esos repos (filtra; no da 403).
+        `repo` sale de los puntos (desde que guardan `blob8`) y, para los puntos anteriores,
+        de `SANDBOX_KEYS`; si nadie lo sabe, `null`.
+      security: [{ statsKey: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Range"
+      responses:
+        "200":
+          description: Repos ordenados por la última petición, de la más reciente a la más vieja
+          headers:
+            Cache-Control:
+              schema: { const: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReposResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { $ref: "#/components/responses/AnalyticsUnavailable" }
+        "503": { $ref: "#/components/responses/MetricsNotConfigured" }
+
 components:
   securitySchemes:
     githubOidc:
@@ -637,3 +666,28 @@ components:
           type: array
           description: Ordenadas por escrituras del sandbox, de mayor a menor
           items: { $ref: "#/components/schemas/BranchStats" }
+    RepoStats:
+      type: object
+      required: [repoId, repo, lastSeenAt, totals, reuseAlerts]
+      properties:
+        repoId: { type: integer }
+        repo:
+          type: [string, "null"]
+          description: "`owner/repo`; null si ni los puntos ni SANDBOX_KEYS lo saben"
+          examples: [OmarAlex24/horizon-stack]
+        lastSeenAt:
+          type: [string, "null"]
+          format: date-time
+          description: La petición de caché más reciente del rango
+        totals: { $ref: "#/components/schemas/Counters" }
+        reuseAlerts: { type: integer, description: "Ramas del repo con reuseAlert en el rango" }
+    ReposResponse:
+      type: object
+      required: [range, generatedAt, reuseAlertMinWrites, repos]
+      properties:
+        range: { type: string, enum: ["1h", "24h", "7d", "30d", "90d"] }
+        generatedAt: { type: string, format: date-time }
+        reuseAlertMinWrites: { type: integer }
+        repos:
+          type: array
+          items: { $ref: "#/components/schemas/RepoStats" }

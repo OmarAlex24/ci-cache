@@ -18,10 +18,26 @@ export function isRange(value: string): value is Range {
   return Object.hasOwn(RANGES, value);
 }
 
-function where(repoId: number, range: Range): string {
+function assertRepoId(repoId: number): void {
   if (!Number.isSafeInteger(repoId) || repoId <= 0) throw new Error("repoId inválido");
+}
+
+export function since(range: Range): string {
   const [amount, unit] = RANGES[range];
-  return `index1 = '${repoId}' AND timestamp > NOW() - INTERVAL '${amount}' ${unit}`;
+  return `timestamp > NOW() - INTERVAL '${amount}' ${unit}`;
+}
+
+function where(repoId: number, range: Range): string {
+  assertRepoId(repoId);
+  return `index1 = '${repoId}' AND ${since(range)}`;
+}
+
+/** `index1 = 'a' OR …` entre paréntesis; sin lista, nada (la llave ve todos los repos). */
+export function repoFilter(repoIds: readonly number[] | undefined): string {
+  if (repoIds === undefined) return "";
+  if (repoIds.length === 0) return " AND 1 = 0";
+  for (const id of repoIds) assertRepoId(id);
+  return ` AND (${repoIds.map((id) => `index1 = '${id}'`).join(" OR ")})`;
 }
 
 /** Peticiones, bytes y duración guardada por nivel × kind × protocolo × resultado. */
@@ -70,16 +86,16 @@ export interface Counters {
 
 const PROTOCOLS = ["turbo", "sccache"] as const;
 
-function emptyCounters(): Counters {
+export function emptyCounters(): Counters {
   return { requests: 0, hits: 0, hitsFromMain: 0, misses: 0, writes: 0, bytesRead: 0, bytesWritten: 0, timeSavedMs: 0, hitRate: null };
 }
 
-const num = (value: unknown): number => {
+export const num = (value: unknown): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-function add(counters: Counters, result: string, requests: number, bytes: number, durationMs: number) {
+export function addResult(counters: Counters, result: string, requests: number, bytes: number, durationMs: number) {
   counters.requests += requests;
   if (result === "hit" || result === "hit-main") {
     counters.hits += requests;
@@ -94,7 +110,7 @@ function add(counters: Counters, result: string, requests: number, bytes: number
   }
 }
 
-function finish(counters: Counters): Counters {
+export function finish(counters: Counters): Counters {
   const reads = counters.hits + counters.misses;
   counters.hitRate = reads === 0 ? null : Math.round((counters.hits / reads) * 10_000) / 10_000;
   return counters;
@@ -112,13 +128,13 @@ export function shapeStats(rows: Record<string, unknown>[]) {
   for (const row of rows) {
     const result = String(row.result);
     const values = [num(row.requests), num(row.bytes), num(row.duration_ms)] as const;
-    add(totals, result, ...values);
+    addResult(totals, result, ...values);
     const tier = String(row.tier) as keyof typeof byTier;
-    if (Object.hasOwn(byTier, tier)) add(byTier[tier], result, ...values);
+    if (Object.hasOwn(byTier, tier)) addResult(byTier[tier], result, ...values);
     const kind = String(row.kind) as keyof typeof byKind;
-    if (Object.hasOwn(byKind, kind)) add(byKind[kind], result, ...values);
+    if (Object.hasOwn(byKind, kind)) addResult(byKind[kind], result, ...values);
     const protocol = String(row.protocol) as keyof typeof byProtocol;
-    if (Object.hasOwn(byProtocol, protocol)) add(byProtocol[protocol], result, ...values);
+    if (Object.hasOwn(byProtocol, protocol)) addResult(byProtocol[protocol], result, ...values);
   }
   for (const counters of [totals, ...Object.values(byTier), ...Object.values(byKind), ...Object.values(byProtocol)]) {
     finish(counters);

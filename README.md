@@ -86,6 +86,7 @@ Detalle completo en [`openapi.yaml`](openapi.yaml).
 | `GET`/`PUT`/`PROPFIND /dav/...` | sesión | WebDAV para sccache |
 | `GET /v1/stats?repo=&range=` | `rk_...` | aciertos, fallos, bytes, tiempo ahorrado, por nivel, kind y protocolo |
 | `GET /v1/stats/branches?repo=&range=` | `rk_...` | reutilización por rama y `reuseAlert` |
+| `GET /v1/stats/repos?range=` | `rk_...` | los repos con tráfico: nombre, totales, `lastSeenAt` y cuántas ramas tienen `reuseAlert` |
 
 ## sccache (WebDAV)
 
@@ -127,6 +128,7 @@ Cada petición de caché (GET o PUT de un objeto; no los HEAD, la consulta en lo
 | `blob5` | resultado: `hit` \| `hit-main` \| `miss` \| `write` |
 | `blob6` | writer-kind del objeto leído (`ci` \| `sandbox`; vacío en fallos) |
 | `blob7` | rama de la sesión |
+| `blob8` | nombre del repo (`owner/repo`); vacío en los puntos anteriores a `/v1/stats/repos` |
 | `double1` | bytes |
 | `double2` | duración guardada del artefacto en ms (`x-artifact-duration` de Turbo; 0 en sccache) |
 
@@ -137,6 +139,12 @@ siguen siendo correctos si AE muestrea. AE guarda los datos 3 meses: el rango m�
 `reuseAlert` en `/v1/stats/branches` es `true` cuando el sandbox escribió al menos
 `REUSE_ALERT_MIN_WRITES` objetos en una rama y la CI de esa rama no acertó ninguno de
 ellos: casi siempre significa que algo entra distinto en las llaves de caché.
+
+`/v1/stats/repos` lista los repos que tuvieron tráfico en el rango, sin pedir sus ids: el
+nombre (de `blob8`; en los puntos viejos, de `SANDBOX_KEYS`; si no, `null`), los totales,
+la última petición (`lastSeenAt`) y cuántas ramas tienen `reuseAlert` (`reuseAlerts`). Una
+llave `rk_` con `repoIds` solo ve esos repos: el listado se filtra, no da 403. Son dos
+consultas a la API SQL por llamada: quien la use desde un panel, que la guarde unos minutos.
 
 ### Server-Timing
 
