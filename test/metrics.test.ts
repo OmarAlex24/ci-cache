@@ -59,11 +59,11 @@ describe("registro de métricas", () => {
 
     const id = String(TEST_REPO_ID);
     expect(metrics.points).toEqual([
-      { indexes: [id], blobs: [id, "rama", "sandbox", "turbo", "write", "sandbox", "feature/m"], doubles: [4, 900] },
-      { indexes: [id], blobs: [id, "main", "ci", "turbo", "write", "ci", "main"], doubles: [2, 300] },
-      { indexes: [id], blobs: [id, "rama", "ci", "turbo", "hit", "sandbox", "feature/m"], doubles: [4, 900] },
-      { indexes: [id], blobs: [id, "rama", "ci", "turbo", "hit-main", "ci", "feature/m"], doubles: [2, 300] },
-      { indexes: [id], blobs: [id, "rama", "ci", "turbo", "miss", "", "feature/m"], doubles: [0, 0] },
+      { indexes: [id], blobs: [id, "rama", "sandbox", "turbo", "write", "sandbox", "feature/m", "acme/widgets"], doubles: [4, 900] },
+      { indexes: [id], blobs: [id, "main", "ci", "turbo", "write", "ci", "main", "acme/widgets"], doubles: [2, 300] },
+      { indexes: [id], blobs: [id, "rama", "ci", "turbo", "hit", "sandbox", "feature/m", "acme/widgets"], doubles: [4, 900] },
+      { indexes: [id], blobs: [id, "rama", "ci", "turbo", "hit-main", "ci", "feature/m", "acme/widgets"], doubles: [2, 300] },
+      { indexes: [id], blobs: [id, "rama", "ci", "turbo", "miss", "", "feature/m", "acme/widgets"], doubles: [0, 0] },
     ]);
   });
 

@@ -67,4 +67,16 @@ export async function findSandboxKey(source: string | undefined, key: string): P
   return findKey(sandboxEntries(source), key);
 }
 
+/**
+ * Nombre de cada repo según SANDBOX_KEYS, para los puntos de métricas anteriores a que
+ * guardaran el nombre. Nunca rompe /v1/stats: un secret mal formado da un mapa vacío.
+ */
+export function sandboxRepoNames(source: string | undefined): Map<number, string> {
+  try {
+    return new Map(sandboxEntries(source).map(([, entry]) => [entry.repoId, entry.repo]));
+  } catch {
+    return new Map();
+  }
+}
+
 export { parseHashMap };

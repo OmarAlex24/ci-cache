@@ -19,7 +19,7 @@ export interface CacheEvent {
  * Orden fijo de columnas en Analytics Engine (las consultas de /v1/stats dependen de él):
  *   index1 = repoId
  *   blob1 = repoId, blob2 = tier, blob3 = kind, blob4 = protocolo, blob5 = resultado,
- *   blob6 = writer-kind del objeto leído, blob7 = rama
+ *   blob6 = writer-kind del objeto leído, blob7 = rama, blob8 = nombre del repo (owner/repo)
  *   double1 = bytes, double2 = duración guardada (ms)
  */
 export const COLUMNS = {
@@ -30,6 +30,8 @@ export const COLUMNS = {
   result: "blob5",
   writerKind: "blob6",
   branch: "blob7",
+  /** Desde /v1/stats/repos; los puntos anteriores lo traen vacío. */
+  repo: "blob8",
   bytes: "double1",
   durationMs: "double2",
 } as const;
@@ -50,6 +52,7 @@ export function recordCacheEvent(c: Context<AppEnv>, event: CacheEvent): void {
         event.result,
         event.writerKind,
         session.branch,
+        session.repo,
       ],
       doubles: [event.bytes, Number.isFinite(event.durationMs) ? event.durationMs : 0],
     });
