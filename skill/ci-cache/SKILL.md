@@ -207,7 +207,7 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 ## Verification checklist
 
 - [ ] `actionlint` is clean, and every cache step has `continue-on-error`.
-- [ ] The job log shows `ci-cache: sesión <tier>` with the expected tier
+- [ ] The job log shows `ci-cache: session <tier>` with the expected tier
       (`rama` on a PR, `main` on a push to main).
 - [ ] Rust: `checkout: /home/user/<repo>` in the CI fingerprint. The
       `target/` saved and the one built have the same `device:inode`.

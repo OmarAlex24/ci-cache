@@ -106,7 +106,7 @@ with "no hay token OIDC".
 The action does **not** export `CI_WORKDIR`. Workflows export it themselves
 from `steps.<id>.outputs.workdir` (see `rust.md`).
 
-The log prints `ci-cache: sesión <tier> (rama <branch>) hasta <expiry>`.
+The log prints `ci-cache: session <tier> (branch <branch>) until <expiry>`.
 Use that line to check the tier.
 
 ## The sandbox script
