@@ -6,7 +6,7 @@ description: >-
 
 inputs:
   url:
-    description: URL of the ci-cache Worker, without a trailing slash (e.g. https://ci-cache.<account>.workers.dev).
+    description: URL of the ci-cache Worker, without a trailing slash (e.g. https://ci-cache.<your-subdomain>.workers.dev).
     required: true
   audience:
     description: Audience of the OIDC token; must match the Worker's CACHE_AUDIENCE.
