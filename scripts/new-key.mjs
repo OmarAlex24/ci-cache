@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-// Genera una llave y la entrada que va en el secret correspondiente. La llave en
-// claro solo se imprime aquí; el Worker solo guarda su sha256.
+// Generates a key and the entry that goes into the matching secret. The plaintext key
+// is only printed here; the Worker only stores its sha256.
 //
-//   node scripts/new-key.mjs sandbox <repoId> <owner/repo> [etiqueta]   → SANDBOX_KEYS
-//   node scripts/new-key.mjs stats <etiqueta> [repoId,repoId...]        → STATS_KEYS
+//   node scripts/new-key.mjs sandbox <repoId> <owner/repo> [label]   → SANDBOX_KEYS
+//   node scripts/new-key.mjs stats <label> [repoId,repoId...]        → STATS_KEYS
 import { createHash, randomBytes } from "node:crypto";
 
 const [kind, ...args] = process.argv.slice(2);
 const usage = [
-  "uso: node scripts/new-key.mjs sandbox <repoId> <owner/repo> [etiqueta]",
-  "     node scripts/new-key.mjs stats <etiqueta> [repoId,repoId...]",
+  "usage: node scripts/new-key.mjs sandbox <repoId> <owner/repo> [label]",
+  "       node scripts/new-key.mjs stats <label> [repoId,repoId...]",
 ].join("\n");
 const isId = (text) => /^[1-9][0-9]*$/.test(text ?? "");
 
@@ -36,8 +36,8 @@ if (kind === "sandbox") {
 
 const key = `${prefix}${randomBytes(32).toString("base64url")}`;
 const hash = createHash("sha256").update(key).digest("hex");
-console.log(`llave (guárdala, no se vuelve a mostrar): ${key}`);
-console.log(`entrada para ${secret} (fusiónala con las existentes):`);
+console.log(`key (save it, it won't be shown again): ${key}`);
+console.log(`entry for ${secret} (merge it with the existing ones):`);
 console.log(JSON.stringify({ [hash]: value }));
 
 function fail() {

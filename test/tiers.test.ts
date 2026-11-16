@@ -11,7 +11,7 @@ const layout: TierLayout = {
   ],
 };
 
-/** Bucket falso: cada get queda pendiente hasta que la prueba lo resuelve. */
+/** Fake bucket: each get stays pending until the test resolves it. */
 function fakeBucket(objects: Record<string, string>) {
   const calls: { key: string; resolve: () => void }[] = [];
   const cancelled: string[] = [];
@@ -40,7 +40,7 @@ function fakeBucket(objects: Record<string, string>) {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("getWithFallback", () => {
-  it("lee la rama y main/ a la vez (una ida y vuelta a R2, no dos)", async () => {
+  it("reads the branch and main/ concurrently (one R2 round trip, not two)", async () => {
     const { bucket, calls } = fakeBucket({ "main/1/sccache/x": "m" });
     const result = getWithFallback(bucket, layout, "x");
     await tick();
@@ -50,7 +50,7 @@ describe("getWithFallback", () => {
     expect((await result)?.source).toBe("main");
   });
 
-  it("prefiere la rama aunque main/ responda antes, y suelta el cuerpo de main/", async () => {
+  it("prefers the branch even if main/ answers first, and releases main/'s body", async () => {
     const { bucket, calls, cancelled } = fakeBucket({ "ramas/1/abc/sccache/x": "r", "main/1/sccache/x": "m" });
     const result = getWithFallback(bucket, layout, "x");
     await tick();
@@ -64,7 +64,7 @@ describe("getWithFallback", () => {
     expect(cancelled).toEqual(["main/1/sccache/x"]);
   });
 
-  it("si la rama no está y main/ tampoco, null", async () => {
+  it("null if neither the branch nor main/ has it", async () => {
     const { bucket, calls } = fakeBucket({});
     const result = getWithFallback(bucket, layout, "x");
     await tick();
@@ -73,8 +73,8 @@ describe("getWithFallback", () => {
   });
 });
 
-describe("headWithFallback en secuencia (consulta en lote de Turbo)", () => {
-  it("solo pregunta a main/ si la rama no lo tiene", async () => {
+describe("sequential headWithFallback (Turbo batch query)", () => {
+  it("only asks main/ if the branch doesn't have it", async () => {
     const { bucket, calls } = fakeBucket({ "main/1/sccache/x": "m" });
     const result = headWithFallback(bucket, layout, "x", untimed, false);
     await tick();
@@ -86,7 +86,7 @@ describe("headWithFallback en secuencia (consulta en lote de Turbo)", () => {
     expect((await result)?.source).toBe("main");
   });
 
-  it("con acierto en la rama hace una sola operación", async () => {
+  it("a branch hit makes a single operation", async () => {
     const { bucket, calls } = fakeBucket({ "ramas/1/abc/sccache/x": "r" });
     const result = headWithFallback(bucket, layout, "x", untimed, false);
     await tick();

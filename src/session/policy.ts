@@ -18,12 +18,12 @@ function refName(ref: string): string {
 }
 
 /**
- * Decide el nivel a partir de quién es el cliente (nunca de lo que pida). Orden:
- * 1. evento de escritura (push) sobre una ref de main → `main`;
- * 2. trae `head_ref` (pull_request, pull_request_target) → `rama` = head_ref;
- * 3. otro evento sobre una ref de main (schedule, workflow_dispatch...) → `main-ro`;
- * 4. cualquier otra ref → `rama` = nombre de la ref.
- * El paso 2 va antes del 3 porque pull_request_target trae `ref` = rama base (main).
+ * Decides the tier from who the client is (never from what it asks for). Order:
+ * 1. a write event (push) on a main ref → `main`;
+ * 2. has `head_ref` (pull_request, pull_request_target) → `rama` (branch tier) = head_ref;
+ * 3. another event on a main ref (schedule, workflow_dispatch...) → `main-ro`;
+ * 4. any other ref → `rama` = the ref's name.
+ * Step 2 comes before step 3 because pull_request_target carries `ref` = the base branch (main).
  */
 export function resolveTier(claims: GithubRunClaims, policy: TierPolicy): { tier: Tier; branch: string } {
   const onMainRef = policy.mainRefs.has(claims.ref);

@@ -1,31 +1,31 @@
-// Configuración del Worker ci-cache. Los secrets (SESSION_SECRET, SANDBOX_KEYS, ...)
-// no van aquí: se cargan con `wrangler secret put` (ver README).
+// Configuration of the ci-cache Worker. Secrets (SESSION_SECRET, SANDBOX_KEYS, ...)
+// don't go here: load them with `wrangler secret put` (see the README).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ci-cache",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-15",
   "observability": { "enabled": true },
-  // Bucket con location hint weur: los runners y sandboxes de Boat están en OVH Francia y
-  // Polonia. El primero (`ci-cache`, sin hint) quedó en WNAM y cada lectura de R2 tardaba
-  // ~180 ms desde Europa. El hint solo se puede dar al crear el bucket.
+  // Bucket with the weur location hint: Boat's runners and sandboxes are at OVH in France
+  // and Poland. The first one (`ci-cache`, no hint) landed in WNAM and every R2 read took
+  // ~180 ms from Europe. The hint can only be given when the bucket is created.
   "r2_buckets": [{ "binding": "CACHE", "bucket_name": "ci-cache-weur" }],
-  // Debe coincidir con METRICS_DATASET (las consultas de /v1/stats usan ese nombre).
+  // Must match METRICS_DATASET (the /v1/stats queries use that name).
   "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "ci_cache" }],
   "vars": {
-    // Audiencia que deben traer los tokens OIDC de GitHub Actions.
+    // Audience that GitHub Actions OIDC tokens must carry.
     "CACHE_AUDIENCE": "ci-cache",
-    // Dueños (usuarios u organizaciones de GitHub) cuyos repos pueden usar la caché.
+    // Owners (GitHub users or organizations) whose repos may use the cache.
     "ALLOWED_OWNERS": "OmarAlex24",
-    // Eventos que, sobre una ref de MAIN_REFS, escriben en main/.
+    // Events that, on a MAIN_REFS ref, write to main/.
     "MAIN_WRITE_EVENTS": "push",
     "MAIN_REFS": "refs/heads/main,refs/heads/master",
-    // Vida del token de sesión, en segundos (6 h).
+    // Session token lifetime, in seconds (6 h).
     "SESSION_TTL_SECONDS": "21600",
-    // Tope por objeto en PUT (100 MB, el tope de cuerpo de un Worker).
+    // Per-object cap on PUT (100 MB, a Worker's request body limit).
     "MAX_ARTIFACT_BYTES": "104857600",
     "METRICS_DATASET": "ci_cache",
-    // /v1/stats/branches marca reuseAlert si el sandbox escribió al menos esto y la CI no acertó nada.
+    // /v1/stats/branches flags reuseAlert if the sandbox wrote at least this many and CI hit none.
     "REUSE_ALERT_MIN_WRITES": "20"
   }
 }

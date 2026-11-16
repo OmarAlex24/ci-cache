@@ -15,7 +15,7 @@ export async function sha256Hex(text: string): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", utf8(text)));
 }
 
-/** Primeros 16 hex de sha256(nombre de la rama): el segmento de rama en las llaves de R2. */
+/** First 16 hex chars of sha256(branch name): the branch segment in R2 keys. */
 export async function branchKey(branch: string): Promise<string> {
   return (await sha256Hex(branch)).slice(0, 16);
 }
@@ -28,7 +28,7 @@ export function base64UrlEncode(bytes: Uint8Array): string {
 
 const BASE64URL = /^[A-Za-z0-9_-]*$/u;
 
-/** Decodifica base64url; devuelve null si la entrada no es base64url válido. */
+/** Decodes base64url; returns null if the input is not valid base64url. */
 export function base64UrlDecode(text: string): Uint8Array<ArrayBuffer> | null {
   if (!BASE64URL.test(text) || text.length % 4 === 1) return null;
   const padded = text.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - (text.length % 4)) % 4);
@@ -42,7 +42,7 @@ export function base64UrlDecode(text: string): Uint8Array<ArrayBuffer> | null {
   }
 }
 
-/** Comparación de tiempo constante (Workers). Longitudes distintas → false sin comparar. */
+/** Constant-time comparison (Workers). Different lengths → false without comparing. */
 export function constantTimeEqual(a: string, b: string): boolean {
   const left = utf8(a);
   const right = utf8(b);

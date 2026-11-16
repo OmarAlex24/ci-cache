@@ -15,7 +15,7 @@ export async function oidcFixture() {
   return { privateKey, jwks };
 }
 
-/** Claims de GitHub Actions por defecto: push a main de acme/widgets. */
+/** Default GitHub Actions claims: a push to main of acme/widgets. */
 export function githubClaims(overrides: JWTPayload = {}): JWTPayload {
   return {
     repository: "acme/widgets",

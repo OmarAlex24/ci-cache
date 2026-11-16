@@ -2,16 +2,16 @@ import { branchKey } from "../crypto.ts";
 import type { SessionClaims } from "../session/token.ts";
 import { untimed, type Timer } from "../timing.ts";
 
-/** Protocolos que comparten el layout `<nivel>/<repoId>[/<branchKey>]/<protocolo>/...`. */
+/** Protocols that share the `<tier>/<repoId>[/<branchKey>]/<protocol>/...` layout. */
 export type Protocol = "turbo" | "sccache";
 
-/** De dónde salió una lectura: la rama de la sesión o main/. */
+/** Where a read came from: the session's branch or main/. */
 export type ReadSource = "own" | "main";
 
 export interface TierLayout {
-  /** Prefijo donde escribe la sesión; null si es de solo lectura (main-ro). */
+  /** Prefix the session writes to; null if it is read-only (main-ro). */
   write: string | null;
-  /** Prefijos de lectura en orden: primero el propio, luego main/ si aplica. */
+  /** Read prefixes in order: its own first, then main/ if applicable. */
   read: { prefix: string; source: ReadSource }[];
 }
 
@@ -24,10 +24,10 @@ export async function branchPrefix(repoId: number, branch: string, protocol: Pro
 }
 
 /**
- * Traduce el nivel de la sesión a prefijos de R2:
- * - main:    lee y escribe main/.
- * - main-ro: solo lee main/ (nunca ramas/).
- * - rama:    lee y escribe su rama; si no está, lee main/.
+ * Maps the session's tier to R2 prefixes:
+ * - main:    reads and writes main/.
+ * - main-ro: only reads main/ (never ramas/).
+ * - rama:    (the branch tier) reads and writes its branch; if missing, reads main/.
  */
 export async function tierLayout(session: SessionClaims, protocol: Protocol): Promise<TierLayout> {
   const main = mainPrefix(session.repoId, protocol);
@@ -45,17 +45,17 @@ export async function tierLayout(session: SessionClaims, protocol: Protocol): Pr
 
 export type ReadResult = "hit" | "hit-main" | "miss";
 
-/** Resultado para métricas: `hit-main` = una rama acertó gracias a main/. */
+/** Result for metrics: `hit-main` = a branch hit thanks to main/. */
 export function readResult(session: SessionClaims, source: ReadSource | null): ReadResult {
   if (source === null) return "miss";
   return session.tier === "rama" && source === "main" ? "hit-main" : "hit";
 }
 
 /**
- * Lee los prefijos del nivel **a la vez** y se queda con el primero que exista, en el
- * orden de `layout.read` (la rama antes que main/). Así un fallo de rama o un acierto
- * desde main/ cuesta una ida y vuelta a R2 en vez de dos; a cambio, una rama hace dos
- * operaciones de lectura de R2 por petición. Las lecturas que sobran se descartan.
+ * Reads the tier's prefixes **concurrently** and keeps the first one that exists, in
+ * `layout.read` order (the branch before main/). That way a branch miss or a hit from
+ * main/ costs one R2 round trip instead of two; in exchange, a branch makes two R2 read
+ * operations per request. Reads that are not needed are discarded.
  */
 async function firstInOrder<T>(
   layout: TierLayout,
@@ -80,7 +80,7 @@ async function firstInOrder<T>(
     }
     return null;
   } finally {
-    // Las que ya no hacen falta: soltar el cuerpo y que su error no quede sin manejar.
+    // The ones no longer needed: release the body and don't leave their errors unhandled.
     for (const rest of pending.slice(index + 1)) {
       rest.result.then((value) => value && release(value), () => undefined);
     }
@@ -88,8 +88,8 @@ async function firstInOrder<T>(
 }
 
 /**
- * GET con fallback: devuelve el primer objeto encontrado y de qué prefijo salió.
- * `time` mide cada lectura como `r2-own` / `r2-main` (Server-Timing).
+ * GET with fallback: returns the first object found and which prefix it came from.
+ * `time` measures each read as `r2-own` / `r2-main` (Server-Timing).
  */
 export function getWithFallback(
   bucket: R2Bucket,
@@ -105,9 +105,9 @@ export function getWithFallback(
 }
 
 /**
- * HEAD con fallback. `concurrent: false` lee main/ solo si la rama no lo tiene: para la
- * consulta en lote de Turbo, que ya lanza cientos de HEAD en paralelo y no gana nada con
- * duplicar las operaciones de R2 (cuentan contra el tope de subpeticiones del Worker).
+ * HEAD with fallback. `concurrent: false` reads main/ only if the branch doesn't have it:
+ * for Turbo's batch query, which already fires hundreds of HEADs in parallel and gains
+ * nothing from doubling the R2 operations (they count against the Worker's subrequest limit).
  */
 export function headWithFallback(
   bucket: R2Bucket,

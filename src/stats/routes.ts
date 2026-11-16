@@ -21,12 +21,12 @@ function readRange(c: Context<AppEnv>): Range {
 function readParams(c: Context<AppEnv>): { repoId: number; range: Range } {
   const repo = c.req.query("repo");
   if (!repo || !REPO_ID.test(repo) || !Number.isSafeInteger(Number(repo))) {
-    throw badRequest("repo debe ser el id numérico del repositorio");
+    throw badRequest("repo must be the numeric repository id");
   }
   const range = readRange(c);
   const repoId = Number(repo);
   const allowed = c.get("statsKey")?.repoIds;
-  if (allowed && !allowed.includes(repoId)) throw forbidden("Esta llave no puede ver ese repositorio");
+  if (allowed && !allowed.includes(repoId)) throw forbidden("This key cannot see that repository");
   return { repoId, range };
 }
 

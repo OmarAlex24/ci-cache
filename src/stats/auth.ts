@@ -5,7 +5,7 @@ import { readBearer } from "../http.ts";
 import { findKey, parseHashMap } from "../session/keys.ts";
 import type { AppEnv } from "../types.ts";
 
-/** Llave de solo lectura de métricas. `repoIds` opcional limita qué repos puede ver. */
+/** Read-only metrics key. The optional `repoIds` limits which repos it can see. */
 export interface StatsKeyEntry {
   label: string;
   repoIds?: number[];
@@ -28,7 +28,7 @@ function statsEntries(source: string | undefined): [string, StatsKeyEntry][] {
   return cache.entries;
 }
 
-/** Exige una llave de STATS_KEYS. Los tokens de sesión y las llaves de sandbox no sirven aquí. */
+/** Requires a key from STATS_KEYS. Session tokens and sandbox keys don't work here. */
 export const requireStatsKey = createMiddleware<AppEnv>(async (c, next) => {
   const key = readBearer(c);
   if (!key) throw unauthorized();

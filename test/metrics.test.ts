@@ -33,7 +33,7 @@ function fakeAnalytics(rows: Record<string, unknown>[] = []) {
 let n = 0;
 const freshHash = () => `${Date.now().toString(16)}${(++n).toString(16).padStart(4, "0")}ff`;
 
-describe("registro de métricas", () => {
+describe("metrics recording", () => {
   const app = createApp({ jwks: createLocalJWKSet({ keys: [] }) });
   const metrics = fakeMetrics();
   const testEnv = { ...env, METRICS: metrics.binding };
@@ -44,7 +44,7 @@ describe("registro de métricas", () => {
     return app.request(path, { method, headers: all, ...(body !== undefined ? { body } : {}) }, testEnv);
   }
 
-  it("un punto por petición de caché con el orden de columnas fijo", async () => {
+  it("one data point per cache request with the fixed column order", async () => {
     const own = freshHash();
     const fromMain = freshHash();
     metrics.points.length = 0;
@@ -54,8 +54,8 @@ describe("registro de métricas", () => {
     await req(pr("feature/m"), "GET", `/v8/artifacts/${own}`);
     await req(pr("feature/m"), "GET", `/v8/artifacts/${fromMain}`);
     await req(pr("feature/m"), "GET", `/v8/artifacts/${freshHash()}`);
-    await req(pr("feature/m"), "HEAD", `/v8/artifacts/${own}`); // no cuenta
-    await req(pr("feature/m"), "POST", "/v8/artifacts", JSON.stringify({ hashes: [own] })); // no cuenta
+    await req(pr("feature/m"), "HEAD", `/v8/artifacts/${own}`); // not counted
+    await req(pr("feature/m"), "POST", "/v8/artifacts", JSON.stringify({ hashes: [own] })); // not counted
 
     const id = String(TEST_REPO_ID);
     expect(metrics.points).toEqual([
@@ -67,7 +67,7 @@ describe("registro de métricas", () => {
     ]);
   });
 
-  it("sccache: cuenta objetos pero no .sccache_check", async () => {
+  it("sccache: counts objects but not .sccache_check", async () => {
     metrics.points.length = 0;
     const path = `1/2/3/${freshHash()}`;
     await req(sandbox("feature/m"), "PUT", "/dav/.sccache_check", "Hello, World!");
@@ -80,7 +80,7 @@ describe("registro de métricas", () => {
     ]);
   });
 
-  it("sin binding METRICS la caché sigue funcionando", async () => {
+  it("without the METRICS binding the cache keeps working", async () => {
     const res = await app.request("/v8/artifacts/status", { headers: { authorization: `Bearer ${await sessionToken(main)}` } }, {
       ...env,
       METRICS: undefined,
@@ -89,8 +89,8 @@ describe("registro de métricas", () => {
   });
 });
 
-describe("SQL de Analytics Engine", () => {
-  it("stats: agrupa por nivel, kind, protocolo y resultado con _sample_interval", () => {
+describe("Analytics Engine SQL", () => {
+  it("stats: groups by tier, kind, protocol and result with _sample_interval", () => {
     expect(statsSql("ci_cache", 4242, "7d")).toBe(
       [
         "SELECT blob2 AS tier, blob3 AS kind, blob4 AS protocol, blob5 AS result,",
@@ -108,7 +108,7 @@ describe("SQL de Analytics Engine", () => {
     expect(statsSql("ci_cache", 1, "90d")).toContain("INTERVAL '90' DAY");
   });
 
-  it("branches: solo nivel rama, por rama, kind, resultado y writer-kind", () => {
+  it("branches: only the rama (branch) tier, by branch, kind, result and writer-kind", () => {
     expect(branchesSql("ci_cache", 4242, "30d")).toBe(
       [
         "SELECT blob7 AS branch, blob3 AS kind, blob5 AS result, blob6 AS writer_kind,",
@@ -123,22 +123,22 @@ describe("SQL de Analytics Engine", () => {
     );
   });
 
-  it("nunca interpola un repoId inválido", () => {
+  it("never interpolates an invalid repoId", () => {
     expect(() => statsSql("ci_cache", Number.NaN, "7d")).toThrow();
     expect(() => statsSql("ci_cache", -1, "7d")).toThrow();
     expect(() => branchesSql("ci_cache", 1.5, "7d")).toThrow();
   });
 });
 
-describe("forma de las respuestas", () => {
-  it("shapeStats suma por nivel, kind y protocolo (AE puede devolver números como texto)", () => {
+describe("response shape", () => {
+  it("shapeStats sums by tier, kind and protocol (AE may return numbers as text)", () => {
     const stats = shapeStats([
       { tier: "rama", kind: "ci", protocol: "turbo", result: "hit", requests: "8", bytes: "800", duration_ms: "4000" },
       { tier: "rama", kind: "ci", protocol: "turbo", result: "hit-main", requests: 2, bytes: 200, duration_ms: 1000 },
       { tier: "rama", kind: "ci", protocol: "sccache", result: "miss", requests: 10, bytes: 0, duration_ms: 0 },
       { tier: "rama", kind: "sandbox", protocol: "sccache", result: "write", requests: 5, bytes: 5000, duration_ms: 0 },
       { tier: "main", kind: "ci", protocol: "turbo", result: "write", requests: 1, bytes: 100, duration_ms: 50 },
-      { tier: "raro", kind: "raro", protocol: "raro", result: "hit", requests: 1, bytes: 1, duration_ms: 1 },
+      { tier: "odd", kind: "odd", protocol: "odd", result: "hit", requests: 1, bytes: 1, duration_ms: 1 },
     ]);
     expect(stats.totals).toEqual({
       requests: 27, hits: 11, hitsFromMain: 2, misses: 10, writes: 6,
@@ -152,35 +152,35 @@ describe("forma de las respuestas", () => {
     expect(stats.byProtocol.sccache).toMatchObject({ misses: 10, writes: 5 });
   });
 
-  it("shapeBranches marca reuseAlert cuando el sandbox escribió ≥ N y la CI no acertó ninguno", () => {
+  it("shapeBranches flags reuseAlert when the sandbox wrote ≥ N and CI hit none of them", () => {
     const branches = shapeBranches(
       [
         { branch: "feature/ok", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: 10 },
         { branch: "feature/ok", kind: "ci", result: "hit", writer_kind: "sandbox", requests: 7 },
         { branch: "feature/ok", kind: "ci", result: "miss", writer_kind: "", requests: 3 },
-        { branch: "feature/mal", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: "12" },
-        { branch: "feature/mal", kind: "ci", result: "hit-main", writer_kind: "ci", requests: 4 },
-        { branch: "feature/mal", kind: "ci", result: "miss", writer_kind: "", requests: 12 },
-        { branch: "feature/poco", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: 2 },
+        { branch: "feature/bad", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: "12" },
+        { branch: "feature/bad", kind: "ci", result: "hit-main", writer_kind: "ci", requests: 4 },
+        { branch: "feature/bad", kind: "ci", result: "miss", writer_kind: "", requests: 12 },
+        { branch: "feature/few", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: 2 },
       ],
       3,
     );
     expect(branches).toEqual([
-      { branch: "feature/mal", sandboxWrites: 12, ciReads: 16, ciHits: 4, ciHitsOnSandboxObjects: 0, reuseAlert: true },
+      { branch: "feature/bad", sandboxWrites: 12, ciReads: 16, ciHits: 4, ciHitsOnSandboxObjects: 0, reuseAlert: true },
       { branch: "feature/ok", sandboxWrites: 10, ciReads: 10, ciHits: 7, ciHitsOnSandboxObjects: 7, reuseAlert: false },
-      { branch: "feature/poco", sandboxWrites: 2, ciReads: 0, ciHits: 0, ciHitsOnSandboxObjects: 0, reuseAlert: false },
+      { branch: "feature/few", sandboxWrites: 2, ciReads: 0, ciHits: 0, ciHitsOnSandboxObjects: 0, reuseAlert: false },
     ]);
   });
 });
 
-describe("GET /v1/stats y /v1/stats/branches", () => {
+describe("GET /v1/stats and /v1/stats/branches", () => {
   const rows = [{ tier: "rama", kind: "ci", protocol: "turbo", result: "hit", requests: 1, bytes: 10, duration_ms: 20 }];
   const analytics = fakeAnalytics(rows);
   const app = createApp({ jwks: createLocalJWKSet({ keys: [] }), analytics: analytics.factory });
   const get = (path: string, token?: string) =>
     app.request(path, token ? { headers: { authorization: `Bearer ${token}` } } : {}, env);
 
-  it("responde con la llave de stats", async () => {
+  it("answers with the stats key", async () => {
     const res = await get(`/v1/stats?repo=${TEST_REPO_ID}&range=24h`, TEST_STATS_KEY);
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("no-store");
@@ -190,26 +190,26 @@ describe("GET /v1/stats y /v1/stats/branches", () => {
     expect(analytics.queries.at(-1)).toContain("FROM ci_cache");
   });
 
-  it("branches usa REUSE_ALERT_MIN_WRITES y rango por defecto 7d", async () => {
+  it("branches uses REUSE_ALERT_MIN_WRITES and the default 7d range", async () => {
     const res = await get(`/v1/stats/branches?repo=${TEST_REPO_ID}`, TEST_STATS_KEY);
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ repoId: TEST_REPO_ID, range: "7d", reuseAlertMinWrites: 3, branches: [] });
     expect(analytics.queries.at(-1)).toContain("blob2 = 'rama'");
   });
 
-  it("valida repo y range", async () => {
+  it("validates repo and range", async () => {
     for (const query of ["", "?repo=abc", "?repo=0", "?repo=1;DROP", "?repo=1&range=1y", "?repo=1&range=7d'--"]) {
       expect((await get(`/v1/stats${query}`, TEST_STATS_KEY)).status, query).toBe(400);
     }
   });
 
-  it("una llave limitada a un repo no ve otros", async () => {
+  it("a key limited to one repo can't see others", async () => {
     expect((await get(`/v1/stats?repo=${TEST_REPO_ID}`, TEST_STATS_KEY_4242)).status).toBe(200);
     expect((await get("/v1/stats?repo=999", TEST_STATS_KEY_4242)).status).toBe(403);
     expect((await get("/v1/stats/branches?repo=999", TEST_STATS_KEY_4242)).status).toBe(403);
   });
 
-  it("las llaves no se cruzan: ni sesión ni sandbox en stats, ni stats en la caché", async () => {
+  it("keys don't cross over: no session or sandbox key on stats, no stats key on the cache", async () => {
     const session = await sessionToken(main);
     expect((await get(`/v1/stats?repo=${TEST_REPO_ID}`)).status).toBe(401);
     expect((await get(`/v1/stats?repo=${TEST_REPO_ID}`, session)).status).toBe(401);
@@ -221,16 +221,16 @@ describe("GET /v1/stats y /v1/stats/branches", () => {
     expect(asSession.status).toBe(401);
   });
 
-  it("sin CF_ACCOUNT_ID/CF_API_TOKEN → 503 sin detalles", async () => {
+  it("without CF_ACCOUNT_ID/CF_API_TOKEN → 503 with no details", async () => {
     const real = createApp({ jwks: createLocalJWKSet({ keys: [] }) });
     const res = await real.request(`/v1/stats?repo=${TEST_REPO_ID}`, { headers: { authorization: `Bearer ${TEST_STATS_KEY}` } }, env);
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ code: "metrics_not_configured", message: "Las métricas no están configuradas" });
+    expect(await res.json()).toEqual({ code: "metrics_not_configured", message: "Metrics are not configured" });
   });
 });
 
-describe("cliente de la API SQL", () => {
-  it("manda el SQL a la cuenta con el token y devuelve data", async () => {
+describe("SQL API client", () => {
+  it("sends the SQL to the account with the token and returns data", async () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fetcher = (async (url: string, init: RequestInit) => {
       calls.push({ url, init });
@@ -244,13 +244,13 @@ describe("cliente de la API SQL", () => {
     expect(calls[0]?.init.body).toBe("SELECT 1");
   });
 
-  it("errores de la API → 502 genérico", async () => {
-    const failing = (async () => new Response("detalle interno", { status: 500 })) as unknown as typeof fetch;
+  it("API errors → generic 502", async () => {
+    const failing = (async () => new Response("internal detail", { status: 500 })) as unknown as typeof fetch;
     await expect(cloudflareAnalytics("0".repeat(32), "t", failing).query("x")).rejects.toMatchObject({ status: 502 });
     const garbage = (async () => Response.json({ nope: true })) as unknown as typeof fetch;
     await expect(cloudflareAnalytics("0".repeat(32), "t", garbage).query("x")).rejects.toMatchObject({ status: 502 });
     const offline = (async () => {
-      throw new TypeError("red");
+      throw new TypeError("network");
     }) as unknown as typeof fetch;
     await expect(cloudflareAnalytics("0".repeat(32), "t", offline).query("x")).rejects.toMatchObject({ status: 502 });
   });
