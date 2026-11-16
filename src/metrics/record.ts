@@ -30,7 +30,7 @@ export const COLUMNS = {
   result: "blob5",
   writerKind: "blob6",
   branch: "blob7",
-  /** Desde /v1/stats/repos; los puntos anteriores lo traen vacío. */
+  /** Since /v1/stats/repos; older data points have it empty. */
   repo: "blob8",
   bytes: "double1",
   durationMs: "double2",

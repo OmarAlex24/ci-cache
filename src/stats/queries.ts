@@ -32,7 +32,7 @@ function where(repoId: number, range: Range): string {
   return `index1 = '${repoId}' AND ${since(range)}`;
 }
 
-/** `index1 = 'a' OR …` entre paréntesis; sin lista, nada (la llave ve todos los repos). */
+/** `index1 = 'a' OR …` in parentheses; without a list, nothing (the key sees every repo). */
 export function repoFilter(repoIds: readonly number[] | undefined): string {
   if (repoIds === undefined) return "";
   if (repoIds.length === 0) return " AND 1 = 0";

@@ -8,8 +8,8 @@ import { repoBranchesSql, reposSql, shapeRepos, toIso } from "../src/stats/repos
 import { TEST_REPO_ID, TEST_SANDBOX_KEY, TEST_STATS_KEY, TEST_STATS_KEY_4242 } from "./bindings.ts";
 import { sessionToken } from "./helpers.ts";
 
-describe("SQL de /v1/stats/repos", () => {
-  it("totales por repo, nombre y resultado, con la última petición", () => {
+describe("/v1/stats/repos SQL", () => {
+  it("totals by repo, name and result, with the latest request", () => {
     expect(reposSql("ci_cache", "7d")).toBe(
       [
         "SELECT blob1 AS repo_id, blob8 AS repo, blob5 AS result,",
@@ -26,7 +26,7 @@ describe("SQL de /v1/stats/repos", () => {
     );
   });
 
-  it("ramas de todos los repos, solo nivel rama", () => {
+  it("branches of every repo, rama (branch) tier only", () => {
     expect(repoBranchesSql("ci_cache", "24h")).toBe(
       [
         "SELECT blob1 AS repo_id, blob7 AS branch, blob3 AS kind, blob5 AS result, blob6 AS writer_kind,",
@@ -40,7 +40,7 @@ describe("SQL de /v1/stats/repos", () => {
     );
   });
 
-  it("una llave limitada filtra por sus repos; una lista vacía no ve nada", () => {
+  it("a limited key filters by its repos; an empty list sees nothing", () => {
     expect(reposSql("ci_cache", "7d", [4242, 7])).toContain(
       "WHERE timestamp > NOW() - INTERVAL '7' DAY AND (index1 = '4242' OR index1 = '7')",
     );
@@ -51,22 +51,22 @@ describe("SQL de /v1/stats/repos", () => {
   });
 });
 
-describe("forma de /v1/stats/repos", () => {
-  const known = new Map([[7, "acme/viejo"]]);
+describe("/v1/stats/repos shape", () => {
+  const known = new Map([[7, "acme/old"]]);
 
-  it("suma por repo, toma el nombre más reciente y cuenta los reuseAlert", () => {
+  it("sums by repo, takes the most recent name and counts the reuseAlerts", () => {
     const repos = shapeRepos(
       [
         { repo_id: "4242", repo: "", result: "hit", requests: "6", bytes: "600", duration_ms: "3000", last_seen: "2026-11-14 10:00:00" },
         { repo_id: "4242", repo: "acme/widgets", result: "miss", requests: 4, bytes: 0, duration_ms: 0, last_seen: "2026-11-15 09:30:00" },
         { repo_id: "4242", repo: "acme/gadgets", result: "write", requests: 2, bytes: 50, duration_ms: 0, last_seen: "2026-11-13 08:00:00" },
         { repo_id: "7", repo: "", result: "write", requests: 25, bytes: 2500, duration_ms: 0, last_seen: "2026-11-12 00:00:00" },
-        { repo_id: "99", repo: "", result: "miss", requests: 1, bytes: 0, duration_ms: 0, last_seen: "basura" },
+        { repo_id: "99", repo: "", result: "miss", requests: 1, bytes: 0, duration_ms: 0, last_seen: "garbage" },
         { repo_id: "x", repo: "", result: "hit", requests: 1, bytes: 1, duration_ms: 1, last_seen: "2026-11-15 00:00:00" },
       ],
       [
-        { repo_id: "7", branch: "feature/mal", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: 25 },
-        { repo_id: "7", branch: "feature/mal", kind: "ci", result: "miss", writer_kind: "", requests: 25 },
+        { repo_id: "7", branch: "feature/bad", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: 25 },
+        { repo_id: "7", branch: "feature/bad", kind: "ci", result: "miss", writer_kind: "", requests: 25 },
         { repo_id: "4242", branch: "feature/ok", kind: "sandbox", result: "write", writer_kind: "sandbox", requests: 2 },
       ],
       { minWrites: 20, knownNames: known },
@@ -82,12 +82,12 @@ describe("forma de /v1/stats/repos", () => {
         },
         reuseAlerts: 0,
       },
-      expect.objectContaining({ repoId: 7, repo: "acme/viejo", lastSeenAt: "2026-11-12T00:00:00.000Z", reuseAlerts: 1 }),
+      expect.objectContaining({ repoId: 7, repo: "acme/old", lastSeenAt: "2026-11-12T00:00:00.000Z", reuseAlerts: 1 }),
       expect.objectContaining({ repoId: 99, repo: null, lastSeenAt: null, reuseAlerts: 0 }),
     ]);
   });
 
-  it("toIso entiende el formato de AE, ISO y segundos Unix", () => {
+  it("toIso understands the AE format, ISO and Unix seconds", () => {
     expect(toIso("2026-11-15 12:34:56")).toBe("2026-11-15T12:34:56.000Z");
     expect(toIso("2026-11-15T12:34:56Z")).toBe("2026-11-15T12:34:56.000Z");
     expect(toIso(1_763_200_000)).toBe(new Date(1_763_200_000_000).toISOString());
@@ -109,7 +109,7 @@ describe("GET /v1/stats/repos", () => {
   const get = (path: string, token?: string) =>
     app.request(path, token ? { headers: { authorization: `Bearer ${token}` } } : {}, env);
 
-  it("lista los repos con tráfico; el nombre sale de SANDBOX_KEYS si el punto no lo trae", async () => {
+  it("lists the repos with traffic; the name comes from SANDBOX_KEYS if the data point lacks it", async () => {
     queries.length = 0;
     const res = await get("/v1/stats/repos?range=24h", TEST_STATS_KEY);
     expect(res.status).toBe(200);
@@ -123,18 +123,18 @@ describe("GET /v1/stats/repos", () => {
     expect(queries.every((sql) => !sql.includes("index1 ="))).toBe(true);
   });
 
-  it("rango por defecto 7d y valida el rango", async () => {
+  it("default range 7d and validates the range", async () => {
     expect(await (await get("/v1/stats/repos", TEST_STATS_KEY)).json()).toMatchObject({ range: "7d" });
     expect((await get("/v1/stats/repos?range=1y", TEST_STATS_KEY)).status).toBe(400);
   });
 
-  it("una llave limitada solo consulta sus repos", async () => {
+  it("a limited key only queries its repos", async () => {
     queries.length = 0;
     expect((await get("/v1/stats/repos", TEST_STATS_KEY_4242)).status).toBe(200);
     expect(queries.every((sql) => sql.includes(`AND (index1 = '${TEST_REPO_ID}')`))).toBe(true);
   });
 
-  it("solo con llave rk_", async () => {
+  it("only with an rk_ key", async () => {
     expect((await get("/v1/stats/repos")).status).toBe(401);
     expect((await get("/v1/stats/repos", TEST_SANDBOX_KEY)).status).toBe(401);
     expect((await get("/v1/stats/repos", await sessionToken())).status).toBe(401);

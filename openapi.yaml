@@ -390,22 +390,22 @@ paths:
 
   /v1/stats/repos:
     get:
-      tags: [métricas]
-      summary: Los repositorios con tráfico en el rango, con sus totales
+      tags: [metrics]
+      summary: The repositories with traffic in the range, with their totals
       operationId: getRepoStats
       description: |
-        Para que un frontend no necesite saber los ids de antemano. Dos consultas a la API SQL
-        de Analytics Engine: los totales por repo (con la última petición) y las ramas de
-        nivel `rama`, para contar los `reuseAlert` de cada repo con la misma regla que
-        `/v1/stats/branches`. Una llave con `repoIds` solo ve esos repos (filtra; no da 403).
-        `repo` sale de los puntos (desde que guardan `blob8`) y, para los puntos anteriores,
-        de `SANDBOX_KEYS`; si nadie lo sabe, `null`.
+        So a frontend doesn't need to know the ids in advance. Two queries to the Analytics
+        Engine SQL API: the totals per repo (with the latest request) and the `rama`-tier
+        branches, to count each repo's `reuseAlert`s with the same rule as
+        `/v1/stats/branches`. A key with `repoIds` only sees those repos (it filters; no 403).
+        `repo` comes from the data points (since they store `blob8`) and, for older points,
+        from `SANDBOX_KEYS`; if nobody knows it, `null`.
       security: [{ statsKey: [] }]
       parameters:
         - $ref: "#/components/parameters/Range"
       responses:
         "200":
-          description: Repos ordenados por la última petición, de la más reciente a la más vieja
+          description: Repos sorted by latest request, most recent first
           headers:
             Cache-Control:
               schema: { const: no-store }
@@ -675,14 +675,14 @@ components:
         repoId: { type: integer }
         repo:
           type: [string, "null"]
-          description: "`owner/repo`; null si ni los puntos ni SANDBOX_KEYS lo saben"
+          description: "`owner/repo`; null if neither the data points nor SANDBOX_KEYS know it"
           examples: [OmarAlex24/horizon-stack]
         lastSeenAt:
           type: [string, "null"]
           format: date-time
-          description: La petición de caché más reciente del rango
+          description: The most recent cache request in the range
         totals: { $ref: "#/components/schemas/Counters" }
-        reuseAlerts: { type: integer, description: "Ramas del repo con reuseAlert en el rango" }
+        reuseAlerts: { type: integer, description: "The repo's branches with reuseAlert in the range" }
     ReposResponse:
       type: object
       required: [range, generatedAt, reuseAlertMinWrites, repos]

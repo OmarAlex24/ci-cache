@@ -68,8 +68,8 @@ export async function findSandboxKey(source: string | undefined, key: string): P
 }
 
 /**
- * Nombre de cada repo según SANDBOX_KEYS, para los puntos de métricas anteriores a que
- * guardaran el nombre. Nunca rompe /v1/stats: un secret mal formado da un mapa vacío.
+ * Each repo's name according to SANDBOX_KEYS, for metrics data points from before the name
+ * was stored. Never breaks /v1/stats: a malformed secret yields an empty map.
  */
 export function sandboxRepoNames(source: string | undefined): Map<number, string> {
   try {
