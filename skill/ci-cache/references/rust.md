@@ -307,7 +307,7 @@ parity problem. Diff the fingerprints.
 
 ## Fingerprint parity
 
-The action prints the fingerprint in its step, after the line `== máquina`.
+The action prints the fingerprint in its step, after the line `== machine`.
 In the sandbox, run:
 
 ```bash

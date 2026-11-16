@@ -72,7 +72,7 @@ is `c8972d60665c09e92455a710e406308f9e1bcbbd`. It is a composite action that
 runs `setup/setup.sh`, then `scripts/cache-fingerprint.sh`.
 
 The job needs `permissions: id-token: write`. Without it, the action fails
-with "no hay token OIDC".
+with "no OIDC token".
 
 **Inputs**
 
