@@ -556,7 +556,7 @@ components:
         token: { type: string, description: "Session token for /v8 and /dav" }
         expiresAt: { type: string, format: date-time }
         repoId: { type: integer }
-        repo: { type: string, examples: [OmarAlex24/horizon-stack] }
+        repo: { type: string, examples: [acme/widgets] }
         tier: { $ref: "#/components/schemas/Tier" }
         branch: { type: string }
         kind: { $ref: "#/components/schemas/SessionKind" }
@@ -676,7 +676,7 @@ components:
         repo:
           type: [string, "null"]
           description: "`owner/repo`; null if neither the data points nor SANDBOX_KEYS know it"
-          examples: [OmarAlex24/horizon-stack]
+          examples: [acme/widgets]
         lastSeenAt:
           type: [string, "null"]
           format: date-time

@@ -16,7 +16,8 @@ It is the complement of the `boated-ci` skill. boated-ci turns many CI jobs
 into one job (fewer machine starts). This skill makes that job fast by
 caching inside it.
 
-From the first rollout (klav, a Rust + extension + Docker monorepo):
+From the first rollout (a Rust workspace + browser extension + Docker
+monorepo):
 - PR CI reused **96 %** of what the sandbox compiled;
 - a warm main ran at **99.84 %** Rust hits;
 - the Docker task went from 406–485 s to **23 s** warm;
@@ -56,7 +57,7 @@ From the first rollout (klav, a Rust + extension + Docker monorepo):
     variables;
   - one page per stack: `rust.md`, `turbo.md`, `docker.md`;
   - `sandbox.md` and `keys.md`;
-  - `measurement.md` and the klav `case-study.md`;
+  - `measurement.md` and `case-study.md` (the first rollout);
   - `roadmap.md`: test-result replay, Go and the other v2 items.
 
 ## Versioning

@@ -5,7 +5,7 @@
 #   cache-stats.sh <owner/repo | repoId> [--range 1h|24h|7d|30d|90d] [--branch <name>] [--json]
 #
 # Env:
-#   CI_CACHE_URL        Worker URL (default https://ci-cache.omarespinosafernandez.workers.dev)
+#   CI_CACHE_URL        your Worker's URL (required), e.g. https://ci-cache.<your-subdomain>.workers.dev
 #   CI_CACHE_STATS_KEY  rk_ key; if unset, read from $CI_CACHE_KEYS_DIR/keys.env
 #   CI_CACHE_KEYS_DIR   default ~/.config/ci-cache
 #
@@ -30,7 +30,8 @@ done
 case $range in 1h | 24h | 7d | 30d | 90d) ;; *) echo "bad --range: $range" >&2; exit 2 ;; esac
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
-url=${CI_CACHE_URL:-https://ci-cache.omarespinosafernandez.workers.dev}
+url=${CI_CACHE_URL:-}
+[[ -n $url ]] || { echo "CI_CACHE_URL is not set: export your Worker's URL (https://ci-cache.<your-subdomain>.workers.dev)" >&2; exit 1; }
 url=${url%/}
 if [[ $target =~ ^[1-9][0-9]*$ ]]; then
   repo_id=$target

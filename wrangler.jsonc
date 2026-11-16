@@ -15,8 +15,9 @@
   "vars": {
     // Audience that GitHub Actions OIDC tokens must carry.
     "CACHE_AUDIENCE": "ci-cache",
-    // Owners (GitHub users or organizations) whose repos may use the cache.
-    "ALLOWED_OWNERS": "OmarAlex24",
+    // Owners (GitHub users or organizations) whose repos may use the cache, comma-separated.
+    // Change this placeholder to your own GitHub user or org before deploying.
+    "ALLOWED_OWNERS": "your-github-user-or-org",
     // Events that, on a MAIN_REFS ref, write to main/.
     "MAIN_WRITE_EVENTS": "push",
     "MAIN_REFS": "refs/heads/main,refs/heads/master",

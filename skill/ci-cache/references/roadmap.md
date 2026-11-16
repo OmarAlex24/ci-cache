@@ -1,7 +1,7 @@
 # Not built yet (v2) and future work
 
 None of this exists in the engine today. Don't wire a repo as if it did.
-Propose it to Omar as engine work when a repo needs it.
+Propose it to the engine owner as engine work when a repo needs it.
 
 ## Result replay
 

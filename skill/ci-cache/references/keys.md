@@ -7,7 +7,8 @@ There are three kinds of credential:
 - **Session tokens**: minted by the Worker, 6 h.
 
 The Worker stores only the **sha256** of each key. The plaintext exists in
-exactly two places: Omar's local key file and the repo's Boat environment.
+exactly two places: the engine owner's local key files and the repo's Boat
+environment.
 
 ## Contents
 - Where keys live
@@ -46,14 +47,15 @@ captures its output without printing it, merges the hash into
 `sandbox_keys.json` and appends the plaintext to `keys.env`:
 
 ```bash
-bash ~/.claude/skills/ci-cache/scripts/mint-sandbox-key.sh OmarAlex24/<repo> [label]
+bash ~/.claude/skills/ci-cache/scripts/mint-sandbox-key.sh <owner>/<repo> [label]
 ```
 
 - It resolves the numeric repo id with `gh api repos/<repo> --jq .id`.
 - It refuses if the repo already has a key. Pass `--rotate` to replace it,
   which also drops the old hash from the map.
 - `CI_CACHE_KEYS_DIR` (default `~/.config/ci-cache`) and `CI_CACHE_REPO`
-  (default `~/dev/ci-cache`) override the paths. Test it with a temporary
+  (the engine checkout; by default the clone the skill lives in, otherwise
+  required) set the paths. Test it with a temporary
   `CI_CACHE_KEYS_DIR`.
 - It prints the variable name, the number of entries in the map and the two
   next commands. It never prints the key or the hash.
@@ -67,11 +69,11 @@ terminal, and the terminal may be a log. Don't.
 the merged file with every repo's entry. A lone new entry would lock every
 other repo's sandboxes out.
 
-Before uploading, check that the file is complete, and get Omar's OK (it
-writes to the production Worker):
+Before uploading, check that the file is complete, and get the engine
+owner's OK (it writes to the production Worker):
 
 ```bash
-cd ~/dev/ci-cache
+cd "$CI_CACHE_REPO"
 echo "Target: Worker ci-cache ($(jq -r .name wrangler.jsonc 2>/dev/null || echo ci-cache)), secret SANDBOX_KEYS"
 jq -r '[.[] | .repo] | sort | .[]' ~/.config/ci-cache/sandbox_keys.json   # repos only, no hashes
 pnpm wrangler secret put SANDBOX_KEYS < ~/.config/ci-cache/sandbox_keys.json
@@ -85,16 +87,16 @@ it from a sandbox with `ci-cache-env.sh`. A 401 means the hash didn't make
 it into the map.
 
 If the local `sandbox_keys.json` might be behind the Worker (someone minted
-elsewhere), stop. The Worker's secret can't be read back. Ask Omar which
-map is current.
+elsewhere), stop. The Worker's secret can't be read back. Ask the engine
+owner which map is current.
 
 ## Stats keys
 
 `node scripts/new-key.mjs stats <label> [repoId,…]`. The optional ids limit
 which repos the key can read. Same handling: capture the output, merge into
 `stats_keys.json`, then `wrangler secret put STATS_KEYS` with the full map.
-The existing `CI_CACHE_STATS_KEY` (label `dashboard`, all repos) is enough
-for `cache-stats.sh`. Mint a new one only for a new consumer.
+A stats key with no repo ids (it reads every repo), saved as
+`CI_CACHE_STATS_KEY` in `keys.env`, is enough for `cache-stats.sh`. Mint a new one only for a new consumer.
 
 ## Rotating a leaked key
 

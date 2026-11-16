@@ -11,12 +11,12 @@ warms the cache for its PR. This page is about that side.
 - Per session: refresh, branch, rebase
 - The sandbox → PR flow
 - Verifying with one sandbox start
-- What only Omar can do
+- What only the account owner can do
 - Never print secrets
 
 ## What a Boat sandbox has
 
-Measured on 2026-11-09 (Boat CLI 1.0.92, a `default` sandbox):
+Measured with Boat CLI 1.0.92 on a `default` sandbox:
 
 - User **`user`**, `HOME=/home/user`, `WORK_DIR=/home/user`. Repos listed
   in the environment are cloned to **`/home/user/<repo>`**. Boat CI checks
@@ -28,7 +28,7 @@ Measured on 2026-11-09 (Boat CLI 1.0.92, a `default` sandbox):
 - The image has cargo and rustc (rustup's `stable`, in `/usr/local/cargo`),
   bun, pnpm, node, jq, curl, `sha256sum` and git. **It has no sccache.**
   `~/.local/bin` comes first on `PATH`.
-- A repo that pins its toolchain (klav since #241) gets it through rustup
+- A repo that pins its toolchain gets it through rustup
   the first time `cargo` runs there: **one download per sandbox**, even
   when the pin is the image's own `stable`. CI renames that toolchain
   instead (`rust.md`), but sandboxes don't run CI's step. The keys should
@@ -51,8 +51,10 @@ Measured on 2026-11-09 (Boat CLI 1.0.92, a `default` sandbox):
 ## Connecting a repo: connect-sandbox.sh
 
 ```bash
-bash ~/.claude/skills/ci-cache/scripts/connect-sandbox.sh OmarAlex24/<repo> [env] --dry-run
-bash ~/.claude/skills/ci-cache/scripts/connect-sandbox.sh OmarAlex24/<repo> [env]
+export CI_CACHE_URL=https://ci-cache.<your-subdomain>.workers.dev
+export CI_CACHE_REPO=/path/to/ci-cache   # not needed when the skill runs from that clone
+bash ~/.claude/skills/ci-cache/scripts/connect-sandbox.sh <owner>/<repo> [env] --dry-run
+bash ~/.claude/skills/ci-cache/scripts/connect-sandbox.sh <owner>/<repo> [env]
 ```
 
 It does, in order:
@@ -70,8 +72,8 @@ It does, in order:
    can't be compared without printing it, and after a rotation the
    environment holds a stale key.
 4. **Deliver two files** into `~/.ci-cache/` (`--dir` changes it):
-   - `ci-cache-env.sh`, from the engine checkout (`~/dev/ci-cache` or
-     `CI_CACHE_REPO`). Keep that checkout on `main`: the header line prints
+   - `ci-cache-env.sh`, from the engine checkout (`CI_CACHE_REPO`, or the
+     clone the skill lives in). Keep that checkout on `main`: the header line prints
      the commit it delivers, with `+local changes` when the file is dirty.
    - `install-sccache.sh`, from this skill's
      `templates/sandbox-install-sccache.sh`. It installs sccache 0.19.0 into
@@ -82,13 +84,13 @@ It does, in order:
 5. **`boat env upgrade`**, so live sandboxes get the new version.
 
 Before every write it prints the target environment and the command, with
-variable names only. Sample (klav, 2026-11-09):
+variable names only. Sample, for a repo `acme/widgets`:
 
 ```
-repo:        OmarAlex24/klav
-Boat env:    klav (argument)
-key:         CI_CACHE_SANDBOX_KEY from CI_CACHE_SANDBOX_KEY_KLAV in ~/.config/ci-cache/keys.env
-files:       ~/dev/ci-cache/scripts/ci-cache-env.sh (7239557) -> /home/user/.ci-cache/ci-cache-env.sh
+repo:        acme/widgets
+Boat env:    widgets (argument)
+key:         CI_CACHE_SANDBOX_KEY from CI_CACHE_SANDBOX_KEY_WIDGETS in ~/.config/ci-cache/keys.env
+files:       /path/to/ci-cache/scripts/ci-cache-env.sh (1a2b3c4) -> /home/user/.ci-cache/ci-cache-env.sh
              ~/.claude/skills/ci-cache/templates/sandbox-install-sccache.sh -> /home/user/.ci-cache/install-sccache.sh
 
 state before:
@@ -98,26 +100,21 @@ state before:
   live sandboxes: 1
   CI_CACHE_SANDBOX_KEY: set (will be set again)
 
--> Boat env 'klav': set-var CI_CACHE_SANDBOX_KEY (value from stdin: CI_CACHE_SANDBOX_KEY_KLAV)
+-> Boat env 'widgets': set-var CI_CACHE_SANDBOX_KEY (value from stdin: CI_CACHE_SANDBOX_KEY_WIDGETS)
 {"success":true,"versionNumber":8}
--> Boat env 'klav': set-file .ci-cache/install-sccache.sh (from …/templates/sandbox-install-sccache.sh)
+-> Boat env 'widgets': set-file .ci-cache/install-sccache.sh (from …/templates/sandbox-install-sccache.sh)
 {"success":true,"versionNumber":9}
--> Boat env 'klav': upgrade (push the new version to live sandboxes)
+-> Boat env 'widgets': upgrade (push the new version to live sandboxes)
 {"success":true,"upgraded":1,"upgradedLive":1,"upgradedStopped":0,"failed":0}
 ```
 
 Variables that enter cache keys are repo-specific, and the script doesn't
-set them. Copy the workflow's values with `set-var` (klav: `RUSTFLAGS=-D
-warnings`, `CARGO_TERM_COLOR=always`; see `rust.md`):
+set them. Copy the workflow's values with `set-var` (for example
+`RUSTFLAGS=-D warnings`, `CARGO_TERM_COLOR=always`; see `rust.md`):
 
 ```bash
 printf '%s' '-D warnings' | boat env set-var <env> RUSTFLAGS --json | jq -c '{success, versionNumber}'
 ```
-
-| Environment | Repo | Variables | Files |
-| --- | --- | --- | --- |
-| `klav` | klav (not listed, see below) | `CI_CACHE_URL`, `CI_CACHE_SANDBOX_KEY`, `RUSTFLAGS`, `CARGO_TERM_COLOR` | both |
-| `horizon-stack` (created 2026-11-09) | horizon-stack (not listed) | `CI_CACHE_URL`, `CI_CACHE_SANDBOX_KEY` | both |
 
 ## Reading Boat environments without printing values
 
@@ -148,17 +145,17 @@ Since nothing runs at startup, the repo's `AGENTS.md`/`CLAUDE.md` tells the
 agent what to run. Keep it to a few lines, in the repo's language. Gate it
 on the sandbox, so it is a no-op on a laptop:
 
-- Rust repo (klav, `CLAUDE.md`, #239, merged 2026-11-09):
+- Rust repo (`CLAUDE.md`):
   ```
   bash ~/.ci-cache/install-sccache.sh && bash ~/.ci-cache/ci-cache-env.sh
   ```
   then `source ~/.ci-cache.env` in every shell that runs cargo. Agent
   shells don't keep exports between calls. It also says not to override
   `RUSTFLAGS` or `CARGO_*`: the environment already matches CI.
-- Turbo repo (horizon-stack, `AGENTS.md`): `bash ~/.ci-cache/ci-cache-env.sh`,
+- Turbo repo (`AGENTS.md`): `bash ~/.ci-cache/ci-cache-env.sh`,
   then `source ~/.ci-cache.env` before Turbo. Run tests with
-  `TURBO_CACHE=local:rw` when CI does: horizon's tests read files Turbo
-  doesn't hash, so a remote hit could replay a stale pass.
+  `TURBO_CACHE=local:rw` when CI does: in one onboarded repo the tests read
+  files Turbo doesn't hash, so a remote hit could replay a stale pass.
 
 Both say: only in a Boat sandbox (`BOAT_ID` set and `~/.ci-cache/`
 present), refresh after a branch switch and every 6 h, work on the PR's
@@ -198,7 +195,7 @@ bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env
 4. Push. PR CI reads the branch tier first, then `main/`.
 5. Check the reuse with `scripts/cache-stats.sh <owner/repo> --branch <name>`:
    - `ciHitsOnSandboxObjects / sandboxWrites` is the share of what the
-     sandbox compiled that CI reused. klav measured **96 %**.
+     sandbox compiled that CI reused. The first rollout measured **96 %**.
    - `reuseAlert` flips to `true` only when `sandboxWrites` is at least
      **20** and CI reused none of them. Below that, read the ratio.
 
@@ -228,20 +225,19 @@ boat delete <id> --yes
 - `/v1/stats/branches` comes from Analytics Engine, a few minutes behind.
   If the branch isn't there yet, read it again later.
 
-The 2026-11-09 run on klav, a `default` machine for 260 s, cost
-**$0.0026**:
-- the session was `rama` on `ci-cache/smoke-20261109`;
+One such run on the first rollout's repo, a `default` machine for 260 s,
+cost **$0.0026**:
+- the session was `rama` (the branch tier) on a throwaway smoke branch;
 - `~/.ci-cache.env` was mode 600, with `RUSTC_WRAPPER` exported;
 - the cold build missed once;
 - after `cargo clean`, it got 1/1 Rust hits from the Worker;
 - `/v1/stats/branches` showed `sandboxWrites: 1`.
 
-## What only Omar can do
+## What only the account owner can do
 
 - **Connect repos for sandboxes** in Boat's GitHub settings. Until then,
-  `boat env add-repo <env> OmarAlex24/<repo>` fails with "repo not
-  connected for sandboxes", and the environment doesn't clone the repo. On
-  2026-11-09 neither `klav` nor `horizon-stack` listed its repo.
+  `boat env add-repo <env> <owner>/<repo>` fails with "repo not
+  connected for sandboxes", and the environment doesn't clone the repo.
 - **Start agent sandboxes with `--environment <env>`.** `base`, the
   default, carries no key. CI runners start from it, so keep keys out of it.
 

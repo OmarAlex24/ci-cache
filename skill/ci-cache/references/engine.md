@@ -1,8 +1,8 @@
 # The engine: what exists and what it exports
 
-The contract is the engine repo: `~/dev/ci-cache` (`OmarAlex24/ci-cache`,
-private). Read its `README.md` (Spanish) and `openapi.yaml` when this page
-and the code disagree. The code wins.
+The contract is the engine repo (`OmarAlex24/ci-cache`, or your fork,
+checked out at `CI_CACHE_REPO`). Read its `README.md` and `openapi.yaml`
+when this page and the code disagree. The code wins.
 
 ## Contents
 - Endpoints
@@ -15,7 +15,8 @@ and the code disagree. The code wins.
 
 ## Endpoints
 
-Base URL: `https://ci-cache.omarespinosafernandez.workers.dev`.
+Base URL: your deployment, `https://ci-cache.<your-subdomain>.workers.dev`.
+The skill's scripts read it from `CI_CACHE_URL`.
 
 | Endpoint | Credential | What it does |
 | --- | --- | --- |
@@ -28,6 +29,7 @@ Base URL: `https://ci-cache.omarespinosafernandez.workers.dev`.
 | `GET`/`PUT`/`PROPFIND /dav/…` | session | WebDAV for sccache (PROPFIND only with `Depth: 0`) |
 | `GET /v1/stats?repo=<id>&range=<r>` | `rk_…` | hits, misses, bytes and time saved, totals plus `byTier`, `byKind`, `byProtocol` |
 | `GET /v1/stats/branches?repo=<id>&range=<r>` | `rk_…` | per branch: `sandboxWrites`, `ciReads`, `ciHits`, `ciHitsOnSandboxObjects`, `reuseAlert` |
+| `GET /v1/stats/repos?range=<r>` | `rk_…` | the repos with traffic in the range: `repoId`, `repo`, `lastSeenAt`, `totals`, `reuseAlerts` |
 
 - `repo` is the **numeric** GitHub repository id:
   `gh api repos/O/R --jq .id`.
@@ -67,8 +69,8 @@ records who wrote it (`writer-kind`: `ci` or `sandbox`), and that is how
 
 ## The setup action (CI side)
 
-`OmarAlex24/ci-cache/setup@<sha>`. Pin a full commit SHA; the current one
-is `c8972d60665c09e92455a710e406308f9e1bcbbd`. It is a composite action that
+`OmarAlex24/ci-cache/setup@<sha>` (or `<your-fork>/ci-cache/setup@<sha>`).
+Pin a full commit SHA from the engine repo. It is a composite action that
 runs `setup/setup.sh`, then `scripts/cache-fingerprint.sh`.
 
 The job needs `permissions: id-token: write`. Without it, the action fails
@@ -162,20 +164,20 @@ reads: use `scripts/mint-sandbox-key.sh` from this skill (see `keys.md`).
 
 ## Who can use it
 
-- `ALLOWED_OWNERS` is `OmarAlex24`. A repository owned by another user or
-  org gets a 403 from `/v1/session` until the Worker's vars change, which
-  needs a deploy and Omar's OK.
+- `ALLOWED_OWNERS` (in `wrangler.jsonc`) is a comma-separated list of
+  GitHub users or orgs, compared case-insensitively. A repository owned by
+  anyone else gets a 403 from `/v1/session` until that list is edited and
+  the Worker redeployed, which needs the engine owner's OK.
 - **Fork PRs** get no OIDC token. Gate the job on same-repo PRs, or accept
   that those runs are uncached:
 
   ```yaml
   if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
   ```
-- The action lives in a private repository. Other repositories can use it
-  only because `OmarAlex24/ci-cache` allows it: `gh api
-  repos/OmarAlex24/ci-cache/actions/permissions/access` returns
-  `access_level: user`, which lets any repo owned by `OmarAlex24` use it.
-  A repo owned by anyone else can't use a private, user-owned action at
-  all. The action would have to become public or move to that org, and
-  `ALLOWED_OWNERS` would have to change too. If a repo fails at "Set up
-  job" with "unable to resolve action", check that setting first.
+- The action is a composite action in the engine repo, so any repo can
+  reference it while that repo is public. A fork points `uses:` at its own
+  copy (`<your-fork>/ci-cache/setup@<sha>`). If the engine repo is private,
+  other repos can use the action only when its Actions access setting
+  allows them (`gh api repos/<owner>/ci-cache/actions/permissions/access`).
+  A job that fails at "Set up job" with "unable to resolve action" points
+  at that setting or at a wrong pin.

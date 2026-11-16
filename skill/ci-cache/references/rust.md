@@ -36,7 +36,7 @@ Consequences:
   restored `target/` holds rlibs built at another path, or without sccache,
   then every crate that depends on them hashes differently. They compile
   locally, sccache uploads the results under keys nobody will look up, and
-  the hit rate collapses. One klav test got 0 hits out of 36.
+  the hit rate collapses. One test in the first rollout got 0 hits out of 36.
 - **The env must match**, down to `CARGO_TERM_COLOR`.
 - `CARGO_INCREMENTAL=0`: sccache does not cache incremental compilations.
   The action and `ci-cache-env.sh` both set it.
@@ -88,7 +88,7 @@ when the mount worked.
    enters keys: `RUSTFLAGS`, `RUSTDOCFLAGS`, `CARGO_*` (`CARGO_TERM_COLOR`,
    `CARGO_PROFILE_*`, `CARGO_BUILD_*`), `CC`, `CXX`, `CFLAGS`, `LDFLAGS`.
 2. Set the **same values** in the repo's Boat environment
-   (`sandbox.md`). For klav, that is `RUSTFLAGS=-D warnings` and
+   (`sandbox.md`). In the first rollout, that was `RUSTFLAGS=-D warnings` and
    `CARGO_TERM_COLOR=always`.
 3. Prefer **few** such variables. A flag that lives in
    `.cargo/config.toml` (`[build] rustflags`, `[term] color`) is read by
@@ -109,8 +109,8 @@ space. That's fine, but a sandbox build won't feed it.
   (`channel = "1.97.1"`). With `channel = "stable"`, both sides resolve
   stable on their own. On a Rust release day the sandbox and CI can run
   different compilers, and every key differs.
-  - klav pins 1.97.1 since #241 (merged 2026-11-09). That was the release
-    Boat's image shipped as `stable`, while upstream stable was 1.99.1.
+  - The first rollout pinned 1.97.1. That was the release Boat's image
+    shipped as `stable`, while upstream stable was 1.99.1.
 - **Pin the release the runner image ships.** CI downloads any other one on
   every run, until the image catches up. Read it from the `rustc` line of
   the toolchain step in a CI log.
@@ -125,8 +125,8 @@ space. That's fine, but a sandbox build won't feed it.
 - The same sccache version on both sides (0.19.0). The action installs
   0.19.0; in the sandbox, install that version.
 - **A re-downloaded or renamed toolchain doesn't make the cache cold.**
-  sccache 0.19's keys don't include the toolchain's path. In klav #241,
-  the same release downloaded again, then renamed, got 100 % Rust hits
+  sccache 0.19's keys don't include the toolchain's path. In the first
+  rollout, the same release downloaded again, then renamed, got 100 % Rust hits
   (about 2,250 requests per run, 0 misses).
 
 ## Reuse the image's toolchain under the pinned name
@@ -134,7 +134,7 @@ space. That's fine, but a sandbox build won't feed it.
 rustup knows toolchains only by their directory name. Boat's image ships
 its release as `stable-x86_64-unknown-linux-gnu`. A pin of that same
 release looks for `1.97.1-x86_64-unknown-linux-gnu`, doesn't find it, and
-downloads it again. In klav that took 150 s and 5.6 s (n=2, two Boat runs
+downloads it again. In the first rollout that took 150 s and 5.6 s (n=2, two Boat runs
 twelve minutes apart), against 2–3 s for the step before the pin.
 
 The fix: when the image's `rustc -V` reports exactly the pin, rename its
@@ -142,16 +142,16 @@ toolchain to the pinned name and leave `stable` as a symlink to it.
 - **Run it before any rustup command.** In a directory with
   `rust-toolchain.toml`, any command that resolves the active toolchain
   installs the pin when it's missing: `rustup --version` does, and so do
-  the `rustc` and `cargo` proxies. In klav's run 42638338138 the rename
-  came after `rustup --version` and found the pin already downloaded.
+  the `rustc` and `cargo` proxies. In one of the first rollout's runs the
+  rename came after `rustup --version` and found the pin already downloaded.
 - **Don't ask rustup where its home is.** `rustup show home` doesn't
   install anything, but reading `RUSTUP_HOME` avoids calling rustup at all.
 - **Touch nothing in any other case.** If the image ships another release,
   rustup downloads the pin as before, and the step warns so that someone
   re-pins.
 
-For any Rust repo on Boat, at the top of the toolchain step (from klav's
-`ci.yml`, #241):
+For any Rust repo on Boat, at the top of the toolchain step (from the first
+rollout's `ci.yml`):
 
 ```bash
 pin=$(sed -nE 's/^channel *= *"([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' rust-toolchain.toml)
@@ -173,12 +173,12 @@ rustup toolchain install   # from rust-toolchain.toml: nothing to download after
 ```
 
 - **Check it in the log**: `reused as 1.97.1-x86_64-unknown-linux-gnu`,
-  then rustup's `info: using existing install`. In klav the step went back
-  to 2–3 s (runs 42640147924 and 42646410867), with 100 % Rust hits.
+  then rustup's `info: using existing install`. In the first rollout the
+  step went back to 2–3 s (n=2), with 100 % Rust hits.
 - **Sandboxes don't run this step.** Each sandbox downloads the pin once,
   the first time `cargo` runs in the repo (`sandbox.md`, `roadmap.md`).
 - **Rejected: `~/.rustup` in the Actions cache.** It's about 600 MB, and
-  the Actions cache delivered 0.7–15 MB/s to Boat on 2026-11-09.
+  the Actions cache delivered 0.7–15 MB/s to Boat when it was measured.
 
 ## rust-cache: order, prefix-key, ~/.cargo only
 
@@ -199,7 +199,7 @@ from sccache.
 - **Bump `prefix-key` whenever the path, the wrapper or what is cached
   changes** (`v1-rust` → `v2-rust`). Old entries keep matching the restore
   key otherwise, and you restore exactly the `target/` you meant to drop.
-  Then propose deleting the old prefix's entries (that needs Omar's OK).
+  Then propose deleting the old prefix's entries (that needs the repo owner's OK).
   `gh cache delete` takes one id or one exact key, so list them first:
 
   ```bash
@@ -234,9 +234,9 @@ jobs:
       - name: "rust: ci-cache"
         id: cache
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/setup@c8972d60665c09e92455a710e406308f9e1bcbbd
+        uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: https://ci-cache.omarespinosafernandez.workers.dev
+          url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
           mount-workdir: "true"
       - name: "rust: build directory"
         if: steps.cache.outputs.workdir != ''
@@ -279,18 +279,18 @@ What to do about it:
 - **Order tasks** so the one on the critical path takes the lock first.
 - **Merge commands into one invocation** where you can, for example clippy
   `--all-targets` and then the tests.
-- **Remove duplicate work.** klav ran `cargo test -p klav-server --doc`
+- **Remove duplicate work.** The first rollout ran `cargo test -p app-server --doc`
   twice, and the second run waited ~2 min on the lock for nothing.
 - **Use a separate `CARGO_TARGET_DIR`** only for a task with a different
   profile or flags. It costs disk, but sccache fills it quickly.
-- **cargo-nextest** runs test binaries in parallel. klav's `test` task went
+- **cargo-nextest** runs test binaries in parallel. The first rollout's `test` task went
   from a 574 s to a 366 s median on busy machines, with a `cargo test`
   fallback when nextest is missing.
 
 ## Reading sccache --show-stats
 
-- **Cache hits rate (Rust)** above ~95 % on a warm PR is normal. klav got
-  99.84 % on a warm main, and 98 % on a PR with a warm cache.
+- **Cache hits rate (Rust)** above ~95 % on a warm PR is normal. The first
+  rollout got 99.84 % on a warm main, and 98 % on a PR with a warm cache.
 - **Cache misses** should be roughly the crates the PR touched, plus the
   crates that depend on them.
 - **Cache timeouts and write errors** should be 0.

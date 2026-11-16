@@ -3,14 +3,28 @@
 # its workflows use (and in what order), what would break cache-key parity, and how full
 # its GitHub Actions cache is (10 GB per repo, least recently used evicted first).
 #
-#   audit-cache.sh <repo-dir> [owner/repo]
+#   audit-cache.sh <repo-dir> [owner/repo] [--allowed-owners owner1,owner2]
 #
 # Read-only. With owner/repo it also calls the GitHub API (2 calls + cache list pages).
+# --allowed-owners (or CI_CACHE_ALLOWED_OWNERS) is your Worker's ALLOWED_OWNERS; with it,
+# the audit warns when the repo's owner would get a 403 from /v1/session.
 set -uo pipefail
 
-[[ $# -ge 1 && -d $1 ]] || { sed -n '2,8s/^# \{0,1\}//p' "$0" >&2; exit 2; }
-dir=$(cd "$1" && pwd)
-repo=${2:-}
+usage() { sed -n '2,11s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+allowed_owners=${CI_CACHE_ALLOWED_OWNERS:-}
+args=()
+while (($#)); do
+  case $1 in
+    --allowed-owners) (($# >= 2)) || usage; allowed_owners=$2; shift ;;
+    --allowed-owners=*) allowed_owners=${1#*=} ;;
+    -h | --help) usage ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+[[ ${#args[@]} -ge 1 && -d ${args[0]} ]] || usage
+dir=$(cd "${args[0]}" && pwd)
+repo=${args[1]:-}
 wf_dir=$dir/.github/workflows
 note() { printf '  - %s\n' "$*"; }
 warn() { printf '  ! %s\n' "$*"; }
@@ -81,7 +95,7 @@ echo "== cache steps in .github/workflows"
 if ((${#workflows[@]} == 0)); then
   note "no workflows"
 else
-  for pattern in 'OmarAlex24/ci-cache/setup' 'id-token: *write' 'mount-workdir' 'Swatinem/rust-cache' \
+  for pattern in '/ci-cache/setup@' 'id-token: *write' 'mount-workdir' 'Swatinem/rust-cache' \
     'prefix-key|cache-targets|save-if' 'mozilla-actions/sccache-action|RUSTC_WRAPPER|SCCACHE_' \
     'actions/cache(/restore|/save)?@' 'cache: *(pnpm|npm|yarn|true)|cache-dependency-path' \
     'TURBO_(TOKEN|TEAM|API|REMOTE_ONLY|CACHE)' 'docker (buildx )?build|docker/build-push-action' \
@@ -100,7 +114,7 @@ echo "== checks"
 for f in ${workflows[@]+"${workflows[@]}"}; do
   rel=${f#"$dir"/}
   rc=$(grep -n 'Swatinem/rust-cache' "$f" | head -1 | cut -d: -f1)
-  cc=$(grep -n 'OmarAlex24/ci-cache/setup' "$f" | head -1 | cut -d: -f1)
+  cc=$(grep -n '/ci-cache/setup@' "$f" | head -1 | cut -d: -f1)
   if [[ -n $rc && -n $cc && $rc -lt $cc ]]; then
     warn "$rel: rust-cache (line $rc) runs before ci-cache (line $cc): RUSTC_WRAPPER is not in its key"
   fi
@@ -120,14 +134,22 @@ for f in ${workflows[@]+"${workflows[@]}"}; do
     warn "$rel: docker build with a cache and no visible uncached retry (ignore-error covers only the export)"
   fi
 done
-[[ " ${found[*]-} " == *" rust "* ]] && ! wgrep 'OmarAlex24/ci-cache/setup' >/dev/null && note "Rust present and no ci-cache step yet: start with references/rust.md"
+[[ " ${found[*]-} " == *" rust "* ]] && ! wgrep '/ci-cache/setup@' >/dev/null && note "Rust present and no ci-cache step yet: start with references/rust.md"
 
 if [[ -n $repo ]]; then
   echo
   echo "== GitHub ($repo)"
   owner=${repo%%/*}
-  if [[ $(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]') != omaralex24 ]]; then
-    warn "owner $owner is not in the Worker's ALLOWED_OWNERS (OmarAlex24): /v1/session will answer 403"
+  if [[ -z $allowed_owners ]]; then
+    note "owner check skipped: pass --allowed-owners (or set CI_CACHE_ALLOWED_OWNERS) to your Worker's ALLOWED_OWNERS"
+  else
+    lower=$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')
+    allowed=$(printf '%s' "$allowed_owners" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+    if [[ ",$allowed," != *",$lower,"* ]]; then
+      warn "owner $owner is not in the Worker's ALLOWED_OWNERS ($allowed_owners): /v1/session will answer 403"
+    else
+      note "owner $owner is in the Worker's ALLOWED_OWNERS"
+    fi
   fi
   if id=$(gh api "repos/$repo" --jq .id 2>/dev/null); then note "repo id: $id (the 'repo' parameter of /v1/stats)"; fi
   if usage=$(gh api "repos/$repo/actions/cache/usage" 2>/dev/null); then
@@ -135,7 +157,7 @@ if [[ -n $repo ]]; then
     count=$(jq -r '.active_caches_count' <<<"$usage")
     gb=$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1e9 }')
     note "Actions cache: $gb GB in $count entries (limit 10 GB per repo)"
-    awk -v b="$bytes" 'BEGIN { exit !(b > 8e9) }' && warn "over ~8 GB: new entries will evict others; propose deleting stale prefixes (with Omar's OK)"
+    awk -v b="$bytes" 'BEGIN { exit !(b > 8e9) }' && warn "over ~8 GB: new entries will evict others; propose deleting stale prefixes (with the repo owner's OK)"
     list=$(gh cache list -R "$repo" --limit 1000 --json key,sizeInBytes,ref,lastAccessedAt 2>/dev/null || echo '[]')
     echo "  by key prefix (hashes stripped):"
     jq -r '.[] | [.key, .sizeInBytes] | @tsv' <<<"$list" |

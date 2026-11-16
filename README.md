@@ -168,7 +168,7 @@ el cuerpo de R2 sigue en streaming después). Con `curl -w '%{time_starttransfer
 | Var | Default | Qué es |
 | --- | --- | --- |
 | `CACHE_AUDIENCE` | `ci-cache` | `aud` que deben traer los OIDC de GitHub |
-| `ALLOWED_OWNERS` | `OmarAlex24` | dueños de GitHub permitidos, separados por comas (sin distinguir mayúsculas) |
+| `ALLOWED_OWNERS` | `your-github-user-or-org` | dueños de GitHub permitidos, separados por comas (sin distinguir mayúsculas) |
 | `MAIN_WRITE_EVENTS` | `push` | eventos que escriben en `main/` |
 | `MAIN_REFS` | `refs/heads/main,refs/heads/master` | refs que cuentan como main |
 | `SESSION_TTL_SECONDS` | `21600` (6 h) | vida del token de sesión |
