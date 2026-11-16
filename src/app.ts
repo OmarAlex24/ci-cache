@@ -13,16 +13,16 @@ import type { AppEnv } from "./types.ts";
 
 export interface AppDeps {
   jwks: JWTVerifyGetKey;
-  /** Cliente de la API SQL de Analytics Engine (inyectable para pruebas). */
+  /** Analytics Engine SQL API client (injectable for tests). */
   analytics?: (env: Env) => AnalyticsClient;
 }
 
 export function createApp(deps: AppDeps) {
   const app = new Hono<AppEnv>();
 
-  // Server-Timing en toda respuesta: `session` (verificar el token), `r2-own`/`r2-main`
-  // (cada lectura de R2) y `total` (hasta que el Worker devuelve la respuesta; el cuerpo
-  // de R2 sigue en streaming después, así que `total` es el primer byte del Worker).
+  // Server-Timing on every response: `session` (verifying the token), `r2-own`/`r2-main`
+  // (each R2 read) and `total` (until the Worker returns the response; the R2 body keeps
+  // streaming afterwards, so `total` is the Worker's first byte).
   app.use(timing({ totalDescription: "" }));
 
   app.get("/health", (c) => c.json({ status: "ok" }));
@@ -31,12 +31,12 @@ export function createApp(deps: AppDeps) {
   app.route("/", davRoutes());
   app.route("/", statsRoutes({ analytics: deps.analytics ?? analyticsFromEnv }));
 
-  app.notFound((c) => jsonError(c, 404, "not_found", "Ruta no encontrada"));
+  app.notFound((c) => jsonError(c, 404, "not_found", "Route not found"));
   app.onError((error, c) => {
     if (error instanceof HttpError) return jsonError(c, error.status, error.code, error.message);
-    // Solo el tipo de error: nunca cabeceras ni cuerpos (podrían llevar tokens).
-    console.error("error interno:", error instanceof Error ? error.name : typeof error);
-    return jsonError(c, 500, "internal_error", "Error interno");
+    // Only the error type: never headers or bodies (they could carry tokens).
+    console.error("internal error:", error instanceof Error ? error.name : typeof error);
+    return jsonError(c, 500, "internal_error", "Internal error");
   });
 
   return app;

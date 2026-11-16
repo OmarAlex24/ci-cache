@@ -30,52 +30,52 @@ async function dav(who: Who | string, method: string, path: string, init: Reques
 const put = (who: Who, path: string, body: string) =>
   dav(who, "PUT", `/dav/${path}`, { body, headers: { "content-length": String(new TextEncoder().encode(body).length) } });
 
-describe("WebDAV para sccache", () => {
-  it("exige token de sesión", async () => {
+describe("WebDAV for sccache", () => {
+  it("requires a session token", async () => {
     expect((await app.request("/dav/.sccache_check", {}, env)).status).toBe(401);
     expect((await dav(TEST_SANDBOX_KEY, "GET", "/dav/.sccache_check")).status).toBe(401);
     expect((await dav("x.y", "PROPFIND", "/dav/", { headers: { depth: "0" } })).status).toBe(401);
   });
 
-  it("sandbox escribe en su rama; PR de la rama lee; main no", async () => {
+  it("sandbox writes to its branch; the branch's PR reads it; main does not", async () => {
     const path = freshPath();
-    expect((await put(sandbox("feature/s"), path, "objeto")).status).toBe(201);
+    expect((await put(sandbox("feature/s"), path, "object")).status).toBe(201);
     const stored = await env.CACHE.head(`ramas/${TEST_REPO_ID}/${await branchKey("feature/s")}/sccache/${path}`);
     expect(stored?.customMetadata).toEqual({ "writer-kind": "sandbox" });
 
     const hit = await dav(pr("feature/s"), "GET", `/dav/${path}`);
     expect(hit.status).toBe(200);
-    expect(await hit.text()).toBe("objeto");
+    expect(await hit.text()).toBe("object");
     expect((await dav(main, "GET", `/dav/${path}`)).status).toBe(404);
     expect((await dav(mainRo, "GET", `/dav/${path}`)).status).toBe(404);
-    expect((await dav(pr("feature/otra"), "GET", `/dav/${path}`)).status).toBe(404);
+    expect((await dav(pr("feature/other"), "GET", `/dav/${path}`)).status).toBe(404);
   });
 
-  it("main escribe en main/ y las ramas caen a main/", async () => {
+  it("main writes to main/ and branches fall back to main/", async () => {
     const path = freshPath();
-    expect((await put(main, path, "de-main")).status).toBe(201);
+    expect((await put(main, path, "from-main")).status).toBe(201);
     expect(await env.CACHE.head(`main/${TEST_REPO_ID}/sccache/${path}`)).not.toBeNull();
-    expect(await (await dav(pr("rama-nueva"), "GET", `/dav/${path}`)).text()).toBe("de-main");
+    expect(await (await dav(pr("new-branch"), "GET", `/dav/${path}`)).text()).toBe("from-main");
     expect((await dav(mainRo, "GET", `/dav/${path}`)).status).toBe(200);
   });
 
-  it("main-ro no escribe (sccache queda en solo lectura)", async () => {
+  it("main-ro does not write (sccache stays read-only)", async () => {
     expect((await put(mainRo, ".sccache_check", "Hello, World!")).status).toBe(403);
   });
 
-  it("los prefijos de turbo y sccache no se mezclan", async () => {
+  it("turbo and sccache prefixes don't mix", async () => {
     const hash = `${Date.now().toString(16)}ab`;
     await put(main, hash, "dav");
     const turbo = await app.request(`/v8/artifacts/${hash}`, { headers: { authorization: `Bearer ${await sessionToken(main)}` } }, env);
     expect(turbo.status).toBe(404);
   });
 
-  it("tolera la doble barra que manda sccache si el endpoint termina en /", async () => {
+  it("tolerates the double slash sccache sends if the endpoint ends in /", async () => {
     await put(sandbox("feature/dbl"), ".sccache_check", "Hello, World!");
     expect((await dav(pr("feature/dbl"), "GET", "/dav//.sccache_check")).status).toBe(200);
   });
 
-  it("PROPFIND Depth 0 sobre un directorio responde 207 con colección y getlastmodified", async () => {
+  it("PROPFIND Depth 0 on a directory answers 207 with a collection and getlastmodified", async () => {
     for (const path of ["/dav/", "/dav//", "/dav/8/e/f/"]) {
       const res = await dav(mainRo, "PROPFIND", path, { headers: { depth: "0" } });
       expect(res.status, path).toBe(207);
@@ -87,20 +87,20 @@ describe("WebDAV para sccache", () => {
     }
   });
 
-  it("PROPFIND sin Depth 0 (listados) → 403; sobre archivo → 404", async () => {
+  it("PROPFIND without Depth 0 (listings) → 403; on a file → 404", async () => {
     expect((await dav(main, "PROPFIND", "/dav/", { headers: { depth: "1" } })).status).toBe(403);
     expect((await dav(main, "PROPFIND", "/dav/", { headers: { depth: "infinity" } })).status).toBe(403);
     expect((await dav(main, "PROPFIND", "/dav/")).status).toBe(403);
     expect((await dav(main, "PROPFIND", "/dav/a/b", { headers: { depth: "0" } })).status).toBe(404);
   });
 
-  it("verbos no usados por sccache → 405", async () => {
+  it("verbs sccache doesn't use → 405", async () => {
     for (const method of ["MKCOL", "DELETE", "MOVE", "COPY", "PROPPATCH", "POST"]) {
       expect((await dav(main, method, "/dav/x")).status, method).toBe(405);
     }
   });
 
-  it("PUT sin content-length → 411; sobre directorio → 400", async () => {
+  it("PUT without content-length → 411; on a directory → 400", async () => {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(new Uint8Array([1]));
@@ -111,7 +111,7 @@ describe("WebDAV para sccache", () => {
     expect((await dav(main, "PUT", "/dav/x/", { body: "a", headers: { "content-length": "1" } })).status).toBe(400);
   });
 
-  it("valida la ruta", async () => {
+  it("validates the path", async () => {
     for (const path of ["/dav/a%20b", "/dav/a/%00", `/dav/${"a".repeat(129)}`, `/dav/${"ab/".repeat(200)}x`]) {
       expect((await dav(main, "GET", path)).status, path).toBe(400);
     }
@@ -122,7 +122,7 @@ describe("WebDAV para sccache", () => {
     expect(parseDavPath("/dav")).toEqual({ path: "", isDir: true });
   });
 
-  it("Server-Timing separa sesión, cada lectura de R2 y el total", async () => {
+  it("Server-Timing separates session, each R2 read and the total", async () => {
     const path = freshPath();
     await put(sandbox("feature/st"), path, "x");
     const timings = (res: Response) =>
@@ -130,11 +130,11 @@ describe("WebDAV para sccache", () => {
 
     const own = await dav(pr("feature/st"), "GET", `/dav/${path}`);
     expect(own.status).toBe(200);
-    // Una rama lee su prefijo y main/ a la vez: las dos lecturas salen en el header.
+    // A branch reads its prefix and main/ concurrently: both reads show up in the header.
     expect(timings(own)).toEqual(expect.arrayContaining(["session", "r2-own", "r2-main", "total"]));
 
-    // Fallo en la rama y en main/.
-    const miss = await dav(pr("feature/st-otra"), "GET", `/dav/${path}`);
+    // Miss on the branch and on main/.
+    const miss = await dav(pr("feature/st-other"), "GET", `/dav/${path}`);
     expect(miss.status).toBe(404);
     expect(timings(miss)).toEqual(expect.arrayContaining(["session", "r2-own", "r2-main", "total"]));
     expect(own.headers.get("server-timing")).toMatch(/r2-own;dur=[0-9.]+/u);

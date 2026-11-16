@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// e2e con el binario real de turbo contra `wrangler dev` y R2 local.
-// Recorre el flujo anti-envenenamiento:
-//   1. sandbox (rama X) falla y escribe en ramas/
-//   2. CI de PR de la rama X acierta
-//   3. CI de main (push) NO acierta (no lee ramas/) y escribe en main/
-//   4. CI de una rama nueva acierta desde main/
-//   5. main-ro (schedule) lee main/ y, con TURBO_CACHE=remote:r, ni intenta escribir
-//   6. main-ro sin remote:r recibe 403 y no deja nada escrito
+// e2e with the real turbo binary against `wrangler dev` and local R2.
+// Walks through the anti-poisoning flow:
+//   1. sandbox (branch X) misses and writes to ramas/
+//   2. PR CI on branch X hits
+//   3. main CI (push) does NOT hit (it doesn't read ramas/) and writes to main/
+//   4. CI on a new branch hits from main/
+//   5. main-ro (schedule) reads main/ and, with TURBO_CACHE=remote:r, doesn't even try to write
+//   6. main-ro without remote:r gets a 403 and leaves nothing written
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,7 +26,7 @@ function writeFixture(dir) {
     "turbo.json": JSON.stringify({ tasks: { build: { outputs: ["dist/**"] } } }, null, 2),
     "packages/app/package.json": JSON.stringify({ name: "app", version: "1.0.0", scripts: { build: "node build.js" } }, null, 2),
     "packages/app/build.js":
-      'const fs = require("node:fs");\nfs.mkdirSync("dist", { recursive: true });\nfs.writeFileSync("dist/out.txt", "compilado " + require("./input.json").value);\nconsole.log("BUILD EJECUTADO");\n',
+      'const fs = require("node:fs");\nfs.mkdirSync("dist", { recursive: true });\nfs.writeFileSync("dist/out.txt", "built " + require("./input.json").value);\nconsole.log("BUILD EXECUTED");\n',
     "packages/app/input.json": JSON.stringify({ value: 1 }),
     ".gitignore": "node_modules\ndist\n.turbo\n",
   };
@@ -40,7 +40,7 @@ async function turbo(dir, url, token, extraEnv = {}) {
   rmSync(join(dir, "packages/app/dist"), { recursive: true, force: true });
   rmSync(join(dir, ".turbo"), { recursive: true, force: true });
   rmSync(join(dir, "packages/app/.turbo"), { recursive: true, force: true });
-  // Por defecto solo caché remota (sin la local) para que cada paso pruebe el Worker.
+  // Remote cache only by default (no local cache) so every step exercises the Worker.
   const cacheFlag = extraEnv.TURBO_CACHE ? [] : ["--cache=remote:rw"];
   const result = await run(TURBO, ["run", "build", ...cacheFlag, "--output-logs=full"], {
     cwd: dir,
@@ -57,14 +57,14 @@ async function turbo(dir, url, token, extraEnv = {}) {
     },
   });
   const out = result.stdout + result.stderr;
-  // Un acierto reproduce los logs guardados, así que "ejecutó" se mide con "cache miss, executing".
+  // A hit replays the stored logs, so "executed" is measured with "cache miss, executing".
   const hit = /cache hit, replaying/i.test(out);
   const miss = /cache miss, executing/i.test(out);
   let restored = null;
   try {
     restored = readFileSync(join(dir, "packages/app/dist/out.txt"), "utf8");
   } catch {
-    // sin salida
+    // no output
   }
   return { code: result.code, out, hit, miss, executed: miss, restored };
 }
@@ -84,45 +84,45 @@ try {
   const branch = `feature/e2e-${repoId}`;
   const id = (tier, b, kind) => mintSession({ repoId, repo: REPO, tier, branch: b, kind });
 
-  console.log("1. sandbox en la rama escribe");
+  console.log("1. sandbox on the branch writes");
   let r = await turbo(dir, worker.url, await id("rama", branch, "sandbox"));
-  check(r.code === 0, "turbo termina bien");
-  check(r.miss && !r.hit && r.executed, "sandbox: cache miss y ejecuta el build");
+  check(r.code === 0, "turbo exits cleanly");
+  check(r.miss && !r.hit && r.executed, "sandbox: cache miss and runs the build");
 
-  console.log("2. CI de PR de la misma rama");
+  console.log("2. PR CI on the same branch");
   r = await turbo(dir, worker.url, await id("rama", branch, "ci"));
-  check(r.code === 0 && r.hit && !r.executed, "PR: cache hit sin ejecutar el build");
-  check(r.restored === "compilado 1", "PR: restaura dist/out.txt desde la caché remota");
+  check(r.code === 0 && r.hit && !r.executed, "PR: cache hit without running the build");
+  check(r.restored === "built 1", "PR: restores dist/out.txt from the remote cache");
 
-  console.log("3. CI de main (push)");
+  console.log("3. main CI (push)");
   r = await turbo(dir, worker.url, await id("main", "main", "ci"));
-  check(r.code === 0 && r.miss && r.executed, "main: NO acierta con lo de la rama (no lee ramas/) y ejecuta");
+  check(r.code === 0 && r.miss && r.executed, "main: does NOT hit the branch's output (doesn't read ramas/) and runs");
 
-  console.log("4. CI de una rama nueva");
-  r = await turbo(dir, worker.url, await id("rama", `feature/otra-${repoId}`, "ci"));
-  check(r.code === 0 && r.hit && !r.executed, "rama nueva: acierta desde main/");
+  console.log("4. CI on a new branch");
+  r = await turbo(dir, worker.url, await id("rama", `feature/other-${repoId}`, "ci"));
+  check(r.code === 0 && r.hit && !r.executed, "new branch: hits from main/");
 
-  console.log("5. main-ro (schedule) con TURBO_CACHE=remote:r, como lo configura setup/action.yml");
+  console.log("5. main-ro (schedule) with TURBO_CACHE=remote:r, as setup/action.yml configures it");
   const readOnly = { TURBO_CACHE: "remote:r" };
   const puts = () => worker.log().split("\n").filter((line) => /PUT \/v8\/artifacts/.test(line)).length;
   r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"), readOnly);
-  check(r.code === 0 && r.hit, "main-ro: lee main/");
+  check(r.code === 0 && r.hit, "main-ro: reads main/");
   writeFileSync(join(dir, "packages/app/input.json"), JSON.stringify({ value: 2 }));
   const before = puts();
   r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"), readOnly);
-  check(r.code === 0 && r.miss && r.executed, "main-ro: con entrada nueva falla y ejecuta");
-  check(puts() === before, "main-ro: con remote:r turbo no intenta escribir (ningún PUT)");
+  check(r.code === 0 && r.miss && r.executed, "main-ro: with a new input misses and runs");
+  check(puts() === before, "main-ro: with remote:r turbo doesn't try to write (no PUT)");
 
-  console.log("6. main-ro SIN remote:r: el 403 apaga la caché remota del run");
+  console.log("6. main-ro WITHOUT remote:r: the 403 turns off the remote cache for the run");
   r = await turbo(dir, worker.url, await id("main-ro", "main", "ci"));
-  check(r.code === 0 && r.miss, "main-ro: el run no se rompe por el 403");
+  check(r.code === 0 && r.miss, "main-ro: the run doesn't break on the 403");
   const warn = r.out.split("\n").filter((line) => /403/.test(line));
   console.log(`  (turbo: ${warn.join(" | ").trim().slice(0, 200)})`);
   r = await turbo(dir, worker.url, await id("main", "main", "ci"));
-  check(r.miss && r.executed, "main: lo que intentó main-ro no quedó escrito");
+  check(r.miss && r.executed, "main: what main-ro tried was not written");
 
   const putLines = worker.log().split("\n").filter((line) => /PUT \/v8\/artifacts/.test(line));
-  console.log(`  peticiones PUT vistas por el Worker: ${putLines.map((l) => l.replace(/.*PUT/, "PUT").replace(/\/v8\/artifacts\/\w+/, "/v8/artifacts/<hash>")).join(" · ")}`);
+  console.log(`  PUT requests seen by the Worker: ${putLines.map((l) => l.replace(/.*PUT/, "PUT").replace(/\/v8\/artifacts\/\w+/, "/v8/artifacts/<hash>")).join(" · ")}`);
   console.log("e2e turbo: OK");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);

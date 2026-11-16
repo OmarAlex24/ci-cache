@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Prueba scripts/ci-cache-env.sh contra `wrangler dev` con una llave de sandbox de
-// prueba (generada aquí y pasada al Worker con --var SANDBOX_KEYS).
+// Tests scripts/ci-cache-env.sh against `wrangler dev` with a test sandbox key
+// (generated here and passed to the Worker with --var SANDBOX_KEYS).
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +21,7 @@ const work = mkdtempSync(join(tmpdir(), "ci-cache-sandbox-e2e-"));
 
 const claims = (token) => JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString());
 
-/** Corre el script como lo haría el sandbox y carga el archivo de exports en un bash limpio. */
+/** Runs the script as the sandbox would and loads the exports file in a clean bash. */
 async function sandboxEnv({ dir, home, extraEnv = {}, path = process.env.PATH }) {
   const env = {
     PATH: path,
@@ -55,44 +55,44 @@ try {
   const home = join(work, "home");
   mkdirSync(home);
 
-  console.log("1. rama feature/sandbox-e2e");
+  console.log("1. branch feature/sandbox-e2e");
   let r = await sandboxEnv({ dir: repoDir, home });
-  check(r.code === 0, `el script termina bien (${r.output.trim().split("\n").at(-2) ?? ""})`);
-  check(!r.output.includes(key) && !r.output.includes(r.loaded.TURBO_TOKEN ?? "###"), "no imprime la llave ni el token");
-  check((statSync(r.file).mode & 0o777) === 0o600, "~/.ci-cache.env queda con permisos 600");
-  check(r.loaded.TURBO_API === worker.url && r.loaded.TURBO_TEAM === "e2e-sandbox", "exporta TURBO_API y TURBO_TEAM (nombre del repo)");
-  check(r.loaded.SCCACHE_WEBDAV_ENDPOINT === `${worker.url}/dav` && r.loaded.SCCACHE_WEBDAV_TOKEN === r.loaded.TURBO_TOKEN, "exporta SCCACHE_WEBDAV_*");
-  check(r.loaded.CARGO_INCREMENTAL === "0", "exporta CARGO_INCREMENTAL=0");
-  check(r.loaded.SCCACHE_WEBDAV_DISABLE_CREATE_DIR === "true", "exporta SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true");
-  check(r.loaded.RUSTC_WRAPPER === "sccache", "exporta RUSTC_WRAPPER=sccache (sccache está instalado)");
+  check(r.code === 0, `the script exits cleanly (${r.output.trim().split("\n").at(-2) ?? ""})`);
+  check(!r.output.includes(key) && !r.output.includes(r.loaded.TURBO_TOKEN ?? "###"), "doesn't print the key or the token");
+  check((statSync(r.file).mode & 0o777) === 0o600, "~/.ci-cache.env ends up with mode 600");
+  check(r.loaded.TURBO_API === worker.url && r.loaded.TURBO_TEAM === "e2e-sandbox", "exports TURBO_API and TURBO_TEAM (repo name)");
+  check(r.loaded.SCCACHE_WEBDAV_ENDPOINT === `${worker.url}/dav` && r.loaded.SCCACHE_WEBDAV_TOKEN === r.loaded.TURBO_TOKEN, "exports SCCACHE_WEBDAV_*");
+  check(r.loaded.CARGO_INCREMENTAL === "0", "exports CARGO_INCREMENTAL=0");
+  check(r.loaded.SCCACHE_WEBDAV_DISABLE_CREATE_DIR === "true", "exports SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true");
+  check(r.loaded.RUSTC_WRAPPER === "sccache", "exports RUSTC_WRAPPER=sccache (sccache is installed)");
   check(
     JSON.stringify(claims(r.loaded.TURBO_TOKEN)).includes('"tier":"rama","branch":"feature/sandbox-e2e","kind":"sandbox"'),
-    "el token es nivel rama de feature/sandbox-e2e, kind sandbox",
+    "the token is rama (branch) tier for feature/sandbox-e2e, kind sandbox",
   );
   const status = await fetch(`${worker.url}/v8/artifacts/status`, { headers: { authorization: `Bearer ${r.loaded.TURBO_TOKEN}` } });
-  check(status.status === 200, "el token sirve contra /v8/artifacts/status");
+  check(status.status === 200, "the token works against /v8/artifacts/status");
   const put = await fetch(`${worker.url}/dav/0/1/2/abc`, {
     method: "PUT",
     body: "x",
     headers: { authorization: `Bearer ${r.loaded.SCCACHE_WEBDAV_TOKEN}` },
   });
-  check(put.status === 201, "y contra /dav (PUT)");
+  check(put.status === 201, "and against /dav (PUT)");
 
-  console.log("2. rama llamada main");
+  console.log("2. branch named main");
   await git("checkout", "-q", "-b", "main");
   r = await sandboxEnv({ dir: repoDir, home });
-  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).tier === "rama" && claims(r.loaded.TURBO_TOKEN).branch === "main", "sigue siendo nivel rama");
+  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).tier === "rama" && claims(r.loaded.TURBO_TOKEN).branch === "main", "still the rama tier");
 
-  console.log("3. HEAD suelto");
+  console.log("3. detached HEAD");
   await git("checkout", "-q", "--detach");
   r = await sandboxEnv({ dir: repoDir, home });
-  check(r.code !== 0 && r.output.includes("CI_CACHE_BRANCH"), "falla y sugiere CI_CACHE_BRANCH");
-  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_BRANCH: 'rama "rara"' } });
-  check(r.code !== 0 && r.output.includes("400"), "una rama inválida (con espacio) devuelve 400");
-  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_BRANCH: 'rama"con-comillas', CI_CACHE_ENV_FILE: join(work, "otro.env") } });
-  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).branch === 'rama"con-comillas', "CI_CACHE_BRANCH y CI_CACHE_ENV_FILE funcionan (comillas escapadas)");
+  check(r.code !== 0 && r.output.includes("CI_CACHE_BRANCH"), "fails and suggests CI_CACHE_BRANCH");
+  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_BRANCH: 'branch "odd"' } });
+  check(r.code !== 0 && r.output.includes("400"), "an invalid branch (with a space) returns 400");
+  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_BRANCH: 'branch"with-quotes', CI_CACHE_ENV_FILE: join(work, "other.env") } });
+  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).branch === 'branch"with-quotes', "CI_CACHE_BRANCH and CI_CACHE_ENV_FILE work (escaped quotes)");
 
-  console.log("4. sin jq (respaldo con sed)");
+  console.log("4. without jq (sed fallback)");
   const bin = join(work, "bin");
   mkdirSync(bin);
   for (const tool of ["bash", "curl", "git", "sed", "mktemp", "rm", "chmod", "env"]) {
@@ -101,16 +101,16 @@ try {
   }
   await git("checkout", "-q", "feature/sandbox-e2e");
   r = await sandboxEnv({ dir: repoDir, home, path: bin });
-  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).branch === "feature/sandbox-e2e", "funciona sin jq");
-  check(r.loaded.RUSTC_WRAPPER === undefined, "sin sccache en PATH no exporta RUSTC_WRAPPER");
+  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).branch === "feature/sandbox-e2e", "works without jq");
+  check(r.loaded.RUSTC_WRAPPER === undefined, "without sccache on PATH it doesn't export RUSTC_WRAPPER");
 
-  console.log("5. llave mala");
+  console.log("5. bad key");
   const before = readFileSync(join(home, ".ci-cache.env"), "utf8");
-  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_SANDBOX_KEY: "sk_mala" } });
-  check(r.code !== 0 && r.output.includes("401"), "falla con 401");
-  check(readFileSync(join(home, ".ci-cache.env"), "utf8") === before, "no toca el archivo de exports existente");
+  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_SANDBOX_KEY: "sk_bad" } });
+  check(r.code !== 0 && r.output.includes("401"), "fails with 401");
+  check(readFileSync(join(home, ".ci-cache.env"), "utf8") === before, "doesn't touch the existing exports file");
   r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_SANDBOX_KEY: "" } });
-  check(r.code !== 0 && r.output.includes("CI_CACHE_SANDBOX_KEY"), "sin llave falla con un mensaje claro");
+  check(r.code !== 0 && r.output.includes("CI_CACHE_SANDBOX_KEY"), "without a key it fails with a clear message");
 
   console.log("e2e ci-cache-env.sh: OK");
 } catch (error) {

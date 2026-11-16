@@ -1,54 +1,54 @@
 name: ci-cache setup
 description: >-
-  Pide una sesión al Worker ci-cache con el OIDC de GitHub Actions y deja listos
-  Turbo (TURBO_API/TURBO_TOKEN/TURBO_TEAM) y, si hay Rust, sccache por WebDAV.
-  El job necesita `permissions: id-token: write`.
+  Requests a session from the ci-cache Worker with the GitHub Actions OIDC token and sets up
+  Turbo (TURBO_API/TURBO_TOKEN/TURBO_TEAM) and, if there is Rust, sccache over WebDAV.
+  The job needs `permissions: id-token: write`.
 
 inputs:
   url:
-    description: URL del Worker ci-cache, sin barra final (p. ej. https://ci-cache.<cuenta>.workers.dev).
+    description: URL of the ci-cache Worker, without a trailing slash (e.g. https://ci-cache.<account>.workers.dev).
     required: true
   audience:
-    description: Audiencia del token OIDC; debe coincidir con CACHE_AUDIENCE del Worker.
+    description: Audience of the OIDC token; must match the Worker's CACHE_AUDIENCE.
     required: false
     default: ci-cache
   sccache:
-    description: "auto (si hay un Cargo.toml), true o false."
+    description: "auto (if there is a Cargo.toml), true or false."
     required: false
     default: auto
   sccache-version:
-    description: Versión de sccache a instalar.
+    description: sccache version to install.
     required: false
     default: 0.19.0
   sccache-sha256:
     description: >-
-      SHA-256 del tarball sccache-v<versión>-<arch>-unknown-linux-musl.tar.gz. Obligatorio si
-      cambias sccache-version; para la versión por defecto ya va fijado (x86_64 y aarch64).
+      SHA-256 of the sccache-v<version>-<arch>-unknown-linux-musl.tar.gz tarball. Required if
+      you change sccache-version; for the default version it is already pinned (x86_64 and aarch64).
     required: false
     default: ""
   mount-workdir:
     description: >-
-      true para montar el checkout en /home/user/<repo> (sudo mount --bind), la misma ruta
-      que usan los sandboxes de Boat, para que las llaves de sccache coincidan.
+      true to mount the checkout at /home/user/<repo> (sudo mount --bind), the same path
+      Boat sandboxes use, so that sccache keys match.
     required: false
     default: "false"
   fingerprint:
-    description: true para imprimir la huella de caché (scripts/cache-fingerprint.sh).
+    description: true to print the cache fingerprint (scripts/cache-fingerprint.sh).
     required: false
     default: "true"
 
 outputs:
   tier:
-    description: Nivel de la sesión (main, main-ro o rama).
+    description: The session's tier (main, main-ro or rama, the branch tier).
     value: ${{ steps.session.outputs.tier }}
   branch:
-    description: Rama de la sesión.
+    description: The session's branch.
     value: ${{ steps.session.outputs.branch }}
   expires-at:
-    description: Expiración del token de sesión (ISO 8601).
+    description: Expiry of the session token (ISO 8601).
     value: ${{ steps.session.outputs.expires-at }}
   workdir:
-    description: Directorio donde compilar (/home/user/<repo> si mount-workdir, si no GITHUB_WORKSPACE).
+    description: Directory to build in (/home/user/<repo> with mount-workdir, otherwise GITHUB_WORKSPACE).
     value: ${{ steps.session.outputs.workdir }}
 
 runs:

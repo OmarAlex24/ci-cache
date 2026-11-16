@@ -18,8 +18,8 @@ import type {
 
 const HASH = /^[0-9a-f]{1,128}$/iu;
 const DECIMAL = /^[0-9]{1,15}$/u;
-// teamId/slug se aceptan pero no deciden el prefijo (lo decide el token).
-// oxlint-disable-next-line no-control-regex -- excluir controles es justo la intención
+// teamId/slug are accepted but don't decide the prefix (the token does).
+// oxlint-disable-next-line no-control-regex -- excluding control characters is exactly the intent
 const TEAM = /^[^\x00-\x1f\x7f]{0,256}$/u;
 const MAX_QUERY_HASHES = 1000;
 const MAX_JSON_BYTES = 1024 * 1024;
@@ -31,13 +31,13 @@ export const META_WRITER = "writer-kind";
 function checkTeam(c: Context<AppEnv>) {
   for (const name of ["teamId", "slug"]) {
     const value = c.req.query(name);
-    if (value !== undefined && !TEAM.test(value)) throw badRequest(`${name} inválido`);
+    if (value !== undefined && !TEAM.test(value)) throw badRequest(`invalid ${name}`);
   }
 }
 
 function readHash(c: Context<AppEnv>): string {
   const hash = c.req.param("hash");
-  if (!hash || !HASH.test(hash)) throw badRequest("El hash del artefacto debe ser hexadecimal");
+  if (!hash || !HASH.test(hash)) throw badRequest("The artifact hash must be hexadecimal");
   return hash.toLowerCase();
 }
 
@@ -52,7 +52,7 @@ function artifactHeaders(object: R2Object): Record<string, string> {
   return headers;
 }
 
-const notFound = () => new HttpError(404, "not_found", "Artefacto no encontrado");
+const notFound = () => new HttpError(404, "not_found", "Artifact not found");
 
 export function turboRoutes() {
   const app = new Hono<AppEnv>();
@@ -69,7 +69,7 @@ export function turboRoutes() {
   app.post("/v8/artifacts/events", async (c) => {
     const events = await readSmallJson(c, MAX_JSON_BYTES);
     if (!Array.isArray(events) || events.length > 10_000 || !events.every(isCacheEvent)) {
-      throw badRequest("Eventos inválidos");
+      throw badRequest("Invalid events");
     }
     return c.body(null, 200);
   });
@@ -78,14 +78,14 @@ export function turboRoutes() {
     const body = await readSmallJson(c, MAX_JSON_BYTES);
     const hashes = (body as { hashes?: unknown } | null)?.hashes;
     if (!Array.isArray(hashes) || hashes.length > MAX_QUERY_HASHES || !hashes.every((h) => typeof h === "string")) {
-      throw badRequest("hashes inválidos");
+      throw badRequest("invalid hashes");
     }
     const layout = await layoutOf(c);
     const unique = [...new Set(hashes as string[])];
     const found = await Promise.all(
       unique.map(async (hash): Promise<[string, ArtifactInfo | null]> => {
         if (!HASH.test(hash)) return [hash, null];
-        // En secuencia: el lote ya va en paralelo y así no duplica las operaciones de R2.
+        // Sequential: the batch already runs in parallel, and this avoids doubling R2 operations.
         const hit = await headWithFallback(c.env.CACHE, layout, hash.toLowerCase(), untimed, false);
         if (!hit) return [hash, null];
         const meta = hit.object.customMetadata ?? {};
@@ -97,7 +97,7 @@ export function turboRoutes() {
     return c.json<ArtifactQueryResponse>(Object.fromEntries(found));
   });
 
-  // Hono atiende HEAD con el handler de GET (y descarta el cuerpo).
+  // Hono serves HEAD with the GET handler (and drops the body).
   app.get("/v8/artifacts/:hash", async (c) => {
     const hash = readHash(c);
     const layout = await layoutOf(c);
@@ -131,12 +131,12 @@ export function turboRoutes() {
     const metadata: Record<string, string> = { [META_WRITER]: session.kind };
     const duration = c.req.header(META_DURATION);
     if (duration !== undefined) {
-      if (!DECIMAL.test(duration)) throw badRequest("x-artifact-duration inválido");
+      if (!DECIMAL.test(duration)) throw badRequest("invalid x-artifact-duration");
       metadata[META_DURATION] = duration;
     }
     const tag = c.req.header(META_TAG);
     if (tag !== undefined) {
-      if (tag.length > 600) throw badRequest("x-artifact-tag inválido");
+      if (tag.length > 600) throw badRequest("invalid x-artifact-tag");
       metadata[META_TAG] = tag;
     }
 

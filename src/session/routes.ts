@@ -11,15 +11,15 @@ import { signSession, type SessionClaims } from "./token.ts";
 
 export const SANDBOX_KEY_PREFIX = "sk_";
 
-// Nombre de rama al estilo git: sin espacios ni controles, sin `~^:?*[\`, sin `..`,
-// sin `/` al inicio o al final. Solo se usa hasheado en las llaves de R2.
-// oxlint-disable-next-line no-control-regex -- excluir controles es justo la intención
+// Git-style branch name: no spaces or control characters, no `~^:?*[\`, no `..`,
+// no leading or trailing `/`. It is only used hashed in R2 keys.
+// oxlint-disable-next-line no-control-regex -- excluding control characters is exactly the intent
 const BRANCH = /^(?!.*\.\.)(?!\/)(?!.*\/$)[^\x00-\x20\x7f~^:?*[\\]{1,255}$/u;
 
 function readBranch(body: unknown): string {
-  if (typeof body !== "object" || body === null) throw badRequest("Falta el campo branch");
+  if (typeof body !== "object" || body === null) throw badRequest("Missing branch field");
   const branch = (body as Record<string, unknown>).branch;
-  if (typeof branch !== "string" || !BRANCH.test(branch)) throw badRequest("branch inválida");
+  if (typeof branch !== "string" || !BRANCH.test(branch)) throw badRequest("invalid branch");
   return branch;
 }
 
@@ -39,7 +39,7 @@ export function sessionRoutes(deps: { jwks: JWTVerifyGetKey }) {
       const branch = readBranch(await readSmallJson(c, 4096));
       const entry = await findSandboxKey(c.env.SANDBOX_KEYS, credential);
       if (!entry) throw unauthorized();
-      // Una llave de sandbox siempre da nivel rama, aunque la rama se llame main.
+      // A sandbox key always gets the branch tier (`rama`), even if the branch is named main.
       claims = { v: 1, repoId: entry.repoId, repo: entry.repo, tier: "rama", branch, kind: "sandbox", exp };
     } else {
       const identity = await verifyGithubOidc(credential, config, deps.jwks);

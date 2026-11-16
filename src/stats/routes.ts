@@ -14,19 +14,19 @@ const REPO_ID = /^[1-9][0-9]{0,15}$/u;
 
 function readRange(c: Context<AppEnv>): Range {
   const range = c.req.query("range") ?? DEFAULT_RANGE;
-  if (!isRange(range)) throw badRequest("range debe ser 1h, 24h, 7d, 30d o 90d");
+  if (!isRange(range)) throw badRequest("range must be 1h, 24h, 7d, 30d or 90d");
   return range;
 }
 
 function readParams(c: Context<AppEnv>): { repoId: number; range: Range } {
   const repo = c.req.query("repo");
   if (!repo || !REPO_ID.test(repo) || !Number.isSafeInteger(Number(repo))) {
-    throw badRequest("repo debe ser el id numérico del repositorio");
+    throw badRequest("repo must be the numeric repository id");
   }
   const range = readRange(c);
   const repoId = Number(repo);
   const allowed = c.get("statsKey")?.repoIds;
-  if (allowed && !allowed.includes(repoId)) throw forbidden("Esta llave no puede ver ese repositorio");
+  if (allowed && !allowed.includes(repoId)) throw forbidden("This key cannot see that repository");
   return { repoId, range };
 }
 
@@ -57,7 +57,7 @@ export function statsRoutes(deps: { analytics: (env: Env) => AnalyticsClient }) 
     });
   });
 
-  // Sin ?repo=: una llave limitada solo ve sus repos (filtro, no 403).
+  // No ?repo=: a limited key only sees its repos (a filter, not a 403).
   app.get("/v1/stats/repos", async (c) => {
     const range = readRange(c);
     const allowed = c.get("statsKey")?.repoIds;

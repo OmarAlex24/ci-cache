@@ -7,7 +7,7 @@ import { timer } from "../timing.ts";
 import type { AppEnv } from "../types.ts";
 import { verifySession } from "./token.ts";
 
-/** Exige un token de sesión válido (solo verifica la firma HMAC: barato). */
+/** Requires a valid session token (only verifies the HMAC signature: cheap). */
 export const requireSession = createMiddleware<AppEnv>(async (c, next) => {
   const token = readBearer(c);
   if (!token) throw unauthorized();

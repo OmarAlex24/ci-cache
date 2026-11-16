@@ -7,7 +7,7 @@ export interface Config {
   mainWriteEvents: ReadonlySet<string>;
   mainRefs: ReadonlySet<string>;
   sessionTtlSeconds: number;
-  /** Tope por objeto en PUT. 100 MB = tope de cuerpo de un Worker (planes Free/Pro). */
+  /** Per-object cap on PUT. 100 MB = a Worker's request body limit (Free/Pro plans). */
   maxArtifactBytes: number;
   metricsDataset: string;
   reuseAlertMinWrites: number;
@@ -41,12 +41,12 @@ function positiveInt(value: string | undefined, fallback: number): number {
 
 function dataset(value: string | undefined): string {
   const name = value === undefined || value.trim() === "" ? DEFAULT_METRICS_DATASET : value.trim();
-  // Va dentro del SQL: solo identificadores simples.
+  // It goes inside the SQL: plain identifiers only.
   if (!DATASET.test(name)) throw misconfigured();
   return name;
 }
 
-const misconfigured = () => new HttpError(500, "misconfigured", "El servicio no está configurado");
+const misconfigured = () => new HttpError(500, "misconfigured", "The service is not configured");
 
 export function readConfig(env: Env): Config {
   if (!env.CACHE_AUDIENCE) throw misconfigured();

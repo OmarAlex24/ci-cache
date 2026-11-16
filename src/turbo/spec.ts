@@ -1,6 +1,6 @@
-// Tipos de la API de Remote Cache de Turborepo (v8), tomados del spec generado en
+// Types for Turborepo's Remote Cache API (v8), taken from the generated spec in
 // AdiRishi/turborepo-remote-cache-cloudflare (packages/spec/turborepo.ts).
-// Copyright (c) 2023 Adishwar Rishi. Licencia MIT:
+// Copyright (c) 2023 Adishwar Rishi. MIT License:
 // https://github.com/AdiRishi/turborepo-remote-cache-cloudflare/blob/main/LICENSE
 
 export type CachingStatus = "disabled" | "enabled" | "over_limit" | "paused";
@@ -10,7 +10,7 @@ export interface CachingStatusResponse {
 }
 
 export interface ArtifactUploadResponse {
-  /** URLs donde quedó el artefacto (informativo). */
+  /** URLs where the artifact was stored (informational). */
   urls: string[];
 }
 

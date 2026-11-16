@@ -11,7 +11,7 @@ import { sessionToken } from "./helpers.ts";
 const app = createApp({ jwks: createLocalJWKSet({ keys: [] }) });
 
 let counter = 0;
-/** Hash único por prueba (R2 local se comparte entre pruebas). */
+/** Unique hash per test (local R2 is shared between tests). */
 function freshHash(): string {
   counter += 1;
   return `${Date.now().toString(16)}${counter.toString(16).padStart(4, "0")}abcdef`.slice(0, 32);
@@ -37,48 +37,48 @@ function put(who: Who, hash: string, body: string | Uint8Array, headers: Record<
   return call(who, `/v8/artifacts/${hash}?teamId=team_x&slug=whatever`, {
     method: "PUT",
     body,
-    // Los clientes reales mandan content-length; un Request creado en proceso no.
+    // Real clients send content-length; a Request created in-process doesn't.
     headers: { "content-type": "application/octet-stream", "content-length": String(byteLength(body)), ...headers },
   });
 }
 
 describe("Turbo: auth", () => {
-  it("todo /v8 exige token de sesión", async () => {
+  it("all of /v8 requires a session token", async () => {
     expect((await app.request("/v8/artifacts/status", {}, env)).status).toBe(401);
     expect((await call(TEST_SANDBOX_KEY, "/v8/artifacts/status")).status).toBe(401);
-    expect((await call("basura", "/v8/artifacts/abc")).status).toBe(401);
+    expect((await call("garbage", "/v8/artifacts/abc")).status).toBe(401);
     expect((await call(main, "/v8/artifacts/status")).status).toBe(200);
   });
 
-  it("status → enabled para todos los niveles", async () => {
+  it("status → enabled for every tier", async () => {
     for (const who of [main, mainRo, sandbox("a"), pr("a")]) {
       expect(await (await call(who, "/v8/artifacts/status")).json()).toEqual({ status: "enabled" });
     }
   });
 });
 
-describe("Turbo: niveles y fallback", () => {
-  it("sandbox escribe en su rama, PR de la misma rama acierta, main no lo ve", async () => {
+describe("Turbo: tiers and fallback", () => {
+  it("sandbox writes to its branch, a PR on the same branch hits, main doesn't see it", async () => {
     const hash = freshHash();
-    const res = await put(sandbox("feature/a"), hash, "artefacto-rama", { "x-artifact-duration": "1234", "x-artifact-tag": "firma" });
+    const res = await put(sandbox("feature/a"), hash, "branch-artifact", { "x-artifact-duration": "1234", "x-artifact-tag": "signature" });
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ urls: [expect.stringContaining(`/v8/artifacts/${hash}`)] });
 
-    // Llave exacta en R2: ramas/<repoId>/<branchKey>/turbo/<hash>
+    // Exact R2 key: ramas/<repoId>/<branchKey>/turbo/<hash>
     const key = `ramas/${TEST_REPO_ID}/${await branchKey("feature/a")}/turbo/${hash}`;
     const stored = await env.CACHE.head(key);
-    expect(stored?.customMetadata).toEqual({ "x-artifact-duration": "1234", "x-artifact-tag": "firma", "writer-kind": "sandbox" });
+    expect(stored?.customMetadata).toEqual({ "x-artifact-duration": "1234", "x-artifact-tag": "signature", "writer-kind": "sandbox" });
 
     const hit = await call(pr("feature/a"), `/v8/artifacts/${hash}`);
     expect(hit.status).toBe(200);
     expect(hit.headers.get("x-artifact-duration")).toBe("1234");
-    expect(hit.headers.get("x-artifact-tag")).toBe("firma");
+    expect(hit.headers.get("x-artifact-tag")).toBe("signature");
     expect(hit.headers.get("content-type")).toBe("application/octet-stream");
-    expect(await hit.text()).toBe("artefacto-rama");
+    expect(await hit.text()).toBe("branch-artifact");
 
     const head = await call(pr("feature/a"), `/v8/artifacts/${hash}`, { method: "HEAD" });
     expect(head.status).toBe(200);
-    expect(head.headers.get("content-length")).toBe(String("artefacto-rama".length));
+    expect(head.headers.get("content-length")).toBe(String("branch-artifact".length));
     expect(await head.text()).toBe("");
 
     for (const who of [main, mainRo, pr("feature/b")]) {
@@ -89,57 +89,57 @@ describe("Turbo: niveles y fallback", () => {
     }
   });
 
-  it("main escribe en main/ y cualquier rama lo lee como fallback", async () => {
+  it("main writes to main/ and any branch reads it as a fallback", async () => {
     const hash = freshHash();
-    expect((await put(main, hash, "artefacto-main")).status).toBe(202);
+    expect((await put(main, hash, "main-artifact")).status).toBe(202);
     expect(await env.CACHE.head(`main/${TEST_REPO_ID}/turbo/${hash}`)).not.toBeNull();
-    const fromBranch = await call(pr("otra-rama-nueva"), `/v8/artifacts/${hash}`);
+    const fromBranch = await call(pr("another-new-branch"), `/v8/artifacts/${hash}`);
     expect(fromBranch.status).toBe(200);
-    expect(await fromBranch.text()).toBe("artefacto-main");
+    expect(await fromBranch.text()).toBe("main-artifact");
     expect((await call(mainRo, `/v8/artifacts/${hash}`)).status).toBe(200);
   });
 
-  it("la rama propia gana sobre main/", async () => {
+  it("the own branch wins over main/", async () => {
     const hash = freshHash();
-    await put(main, hash, "de-main");
-    await put(sandbox("feature/c"), hash, "de-rama");
-    expect(await (await call(pr("feature/c"), `/v8/artifacts/${hash}`)).text()).toBe("de-rama");
-    expect(await (await call(main, `/v8/artifacts/${hash}`)).text()).toBe("de-main");
+    await put(main, hash, "from-main");
+    await put(sandbox("feature/c"), hash, "from-branch");
+    expect(await (await call(pr("feature/c"), `/v8/artifacts/${hash}`)).text()).toBe("from-branch");
+    expect(await (await call(main, `/v8/artifacts/${hash}`)).text()).toBe("from-main");
   });
 
-  it("main-ro no puede escribir (403)", async () => {
+  it("main-ro cannot write (403)", async () => {
     const res = await put(mainRo, freshHash(), "x");
     expect(res.status).toBe(403);
-    // Formato que entiende el cliente de turbo, además de { code, message }.
+    // The format the turbo client understands, in addition to { code, message }.
     expect(await res.json()).toEqual({
       code: "forbidden",
-      message: "Este token solo puede leer main/",
-      error: { code: "forbidden", message: "Este token solo puede leer main/" },
+      message: "This token can only read main/",
+      error: { code: "forbidden", message: "This token can only read main/" },
     });
   });
 
-  it("sandbox en una rama llamada main escribe en ramas/, nunca en main/", async () => {
+  it("a sandbox on a branch named main writes to ramas/, never to main/", async () => {
     const hash = freshHash();
-    expect((await put(sandbox("main"), hash, "envenenado")).status).toBe(202);
+    expect((await put(sandbox("main"), hash, "poisoned")).status).toBe(202);
     expect(await env.CACHE.head(`main/${TEST_REPO_ID}/turbo/${hash}`)).toBeNull();
     expect((await call(main, `/v8/artifacts/${hash}`)).status).toBe(404);
     expect((await call(pr("main"), `/v8/artifacts/${hash}`)).status).toBe(200);
   });
 
-  it("otro repo no ve los artefactos", async () => {
+  it("another repo doesn't see the artifacts", async () => {
     const hash = freshHash();
     await put(main, hash, "x");
     expect((await call({ ...main, repoId: 999 }, `/v8/artifacts/${hash}`)).status).toBe(404);
   });
 
-  it("teamId/slug no cambian el prefijo", async () => {
+  it("teamId/slug don't change the prefix", async () => {
     const hash = freshHash();
     await put(main, hash, "x");
-    expect((await call(main, `/v8/artifacts/${hash}?teamId=otro`)).status).toBe(200);
-    expect((await call(main, `/v8/artifacts/${hash}?slug=otro`)).status).toBe(200);
+    expect((await call(main, `/v8/artifacts/${hash}?teamId=other`)).status).toBe(200);
+    expect((await call(main, `/v8/artifacts/${hash}?slug=other`)).status).toBe(200);
   });
 
-  it("sube y baja 5 MB en streaming sin corromper", async () => {
+  it("streams 5 MB up and down without corruption", async () => {
     const hash = freshHash();
     const data = new Uint8Array(5 * 1024 * 1024);
     for (let i = 0; i < data.length; i++) data[i] = (i * 31) & 0xff;
@@ -150,19 +150,19 @@ describe("Turbo: niveles y fallback", () => {
   });
 });
 
-describe("Turbo: validación", () => {
-  it("rechaza hashes no hexadecimales o demasiado largos", async () => {
+describe("Turbo: validation", () => {
+  it("rejects non-hex or too-long hashes", async () => {
     for (const hash of ["xyz", "abc-def", "a".repeat(129), "..%2Fmain"]) {
       expect((await call(main, `/v8/artifacts/${hash}`)).status, hash).toBe(400);
       expect((await put(main, hash, "x")).status, hash).toBe(400);
     }
   });
 
-  it("rechaza teamId con caracteres de control", async () => {
+  it("rejects teamId with control characters", async () => {
     expect((await call(main, "/v8/artifacts/status?teamId=a%00b")).status).toBe(400);
   });
 
-  it("PUT sin content-length → 411", async () => {
+  it("PUT without content-length → 411", async () => {
     const stream = new ReadableStream({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("x"));
@@ -173,7 +173,7 @@ describe("Turbo: validación", () => {
     expect(res.status).toBe(411);
   });
 
-  it("PUT por encima del tope → 413", async () => {
+  it("PUT above the cap → 413", async () => {
     const res = await call(main, `/v8/artifacts/${freshHash()}`, { method: "PUT", body: "0123456789A", headers: { "content-length": "11" } }, {
       ...env,
       MAX_ARTIFACT_BYTES: "10",
@@ -181,14 +181,14 @@ describe("Turbo: validación", () => {
     expect(res.status).toBe(413);
   });
 
-  it("valida x-artifact-duration y x-artifact-tag", async () => {
+  it("validates x-artifact-duration and x-artifact-tag", async () => {
     expect((await put(main, freshHash(), "x", { "x-artifact-duration": "-1" })).status).toBe(400);
     expect((await put(main, freshHash(), "x", { "x-artifact-tag": "t".repeat(601) })).status).toBe(400);
   });
 });
 
-describe("Turbo: consulta en lote y eventos", () => {
-  it("POST /v8/artifacts aplica el fallback por hash", async () => {
+describe("Turbo: batch query and events", () => {
+  it("POST /v8/artifacts applies the fallback per hash", async () => {
     const own = freshHash();
     const fromMain = freshHash();
     const missing = freshHash();
@@ -208,14 +208,14 @@ describe("Turbo: consulta en lote y eventos", () => {
     });
   });
 
-  it("POST /v8/artifacts valida el cuerpo", async () => {
+  it("POST /v8/artifacts validates the body", async () => {
     for (const body of ["{}", '{"hashes":"x"}', '{"hashes":[1]}', "no-json"]) {
       const res = await call(main, "/v8/artifacts", { method: "POST", body, headers: { "content-type": "application/json" } });
       expect(res.status, body).toBe(400);
     }
   });
 
-  it("POST /v8/artifacts/events acepta eventos válidos y rechaza basura", async () => {
+  it("POST /v8/artifacts/events accepts valid events and rejects garbage", async () => {
     const ok = await call(main, "/v8/artifacts/events", {
       method: "POST",
       headers: { "content-type": "application/json" },

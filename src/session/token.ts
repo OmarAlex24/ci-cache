@@ -1,7 +1,7 @@
-// Token de sesión propio: `base64url(JSON de claims) "." base64url(HMAC-SHA256)`.
-// Se emite en POST /v1/session y cada petición de caché solo verifica la firma.
-// Este módulo también lo importan los scripts de Node (scripts/mint-session.mjs),
-// así que solo usa Web Crypto estándar.
+// Our own session token: `base64url(claims JSON) "." base64url(HMAC-SHA256)`.
+// Issued by POST /v1/session; each cache request only verifies the signature.
+// Node scripts (scripts/mint-session.mjs) also import this module, so it only uses
+// standard Web Crypto.
 import { base64UrlDecode, base64UrlEncode, utf8 } from "../crypto.ts";
 
 export const TIERS = ["main", "main-ro", "rama"] as const;
@@ -11,15 +11,15 @@ export type SessionKind = (typeof SESSION_KINDS)[number];
 
 export interface SessionClaims {
   v: 1;
-  /** Id numérico del repo de GitHub. */
+  /** Numeric id of the GitHub repo. */
   repoId: number;
-  /** `owner/name`, informativo. */
+  /** `owner/name`, informational. */
   repo: string;
   tier: Tier;
-  /** Rama de la sesión (en `main`/`main-ro`, la rama de main). */
+  /** The session's branch (for `main`/`main-ro`, the main branch). */
   branch: string;
   kind: SessionKind;
-  /** Expiración, segundos Unix. */
+  /** Expiry, Unix seconds. */
   exp: number;
 }
 
@@ -44,7 +44,7 @@ export async function signSession(claims: SessionClaims, secret: string): Promis
   return `${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
 }
 
-/** Verifica firma (tiempo constante vía `crypto.subtle.verify`), forma y expiración. */
+/** Verifies the signature (constant time via `crypto.subtle.verify`), shape and expiry. */
 export async function verifySession(
   token: string,
   secret: string,

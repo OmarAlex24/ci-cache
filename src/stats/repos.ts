@@ -1,11 +1,11 @@
 import { COLUMNS } from "../metrics/record.ts";
 import { addResult, emptyCounters, finish, num, repoFilter, shapeBranches, since, type Counters, type Range } from "./queries.ts";
 
-// GET /v1/stats/repos: los repos con tráfico en el rango, sin que el cliente sepa sus ids.
-// Dos consultas: los totales por repo (y la última petición) y las ramas, para contar los
-// reuseAlert de cada repo con la misma regla que /v1/stats/branches.
+// GET /v1/stats/repos: the repos with traffic in the range, without the client knowing their ids.
+// Two queries: totals per repo (and the latest request) and the branches, to count each
+// repo's reuseAlerts with the same rule as /v1/stats/branches.
 
-/** Totales y última petición por repo, nombre (blob8; vacío en puntos viejos) y resultado. */
+/** Totals and latest request by repo, name (blob8; empty in old data points) and result. */
 export function reposSql(dataset: string, range: Range, repoIds?: readonly number[]): string {
   return [
     `SELECT ${COLUMNS.repoId} AS repo_id, ${COLUMNS.repo} AS repo, ${COLUMNS.result} AS result,`,
@@ -21,7 +21,7 @@ export function reposSql(dataset: string, range: Range, repoIds?: readonly numbe
   ].join("\n");
 }
 
-/** Lo mismo que branchesSql, para todos los repos a la vez. */
+/** The same as branchesSql, for every repo at once. */
 export function repoBranchesSql(dataset: string, range: Range, repoIds?: readonly number[]): string {
   return [
     `SELECT ${COLUMNS.repoId} AS repo_id, ${COLUMNS.branch} AS branch, ${COLUMNS.kind} AS kind, ${COLUMNS.result} AS result, ${COLUMNS.writerKind} AS writer_kind,`,
@@ -36,18 +36,18 @@ export function repoBranchesSql(dataset: string, range: Range, repoIds?: readonl
 
 export interface RepoStats {
   repoId: number;
-  /** `owner/repo` según los puntos más recientes o SANDBOX_KEYS; null si nadie lo sabe. */
+  /** `owner/repo` from the most recent data points or SANDBOX_KEYS; null if nobody knows it. */
   repo: string | null;
-  /** La petición más reciente del rango (ISO 8601, UTC). */
+  /** The most recent request in the range (ISO 8601, UTC). */
   lastSeenAt: string | null;
   totals: Counters;
-  /** Ramas con reuseAlert en el rango. */
+  /** Branches with reuseAlert in the range. */
   reuseAlerts: number;
 }
 
 const AE_DATETIME = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/u;
 
-/** AE devuelve `YYYY-MM-DD HH:MM:SS` en UTC; también se aceptan ISO y segundos Unix. */
+/** AE returns `YYYY-MM-DD HH:MM:SS` in UTC; ISO and Unix seconds are accepted too. */
 export function toIso(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) return new Date(value * 1000).toISOString();
   if (typeof value !== "string" || value === "") return null;
@@ -63,7 +63,7 @@ const repoIdOf = (row: Record<string, unknown>): number | null => {
 
 interface Draft {
   stats: RepoStats;
-  /** Fecha del punto que dio el nombre: si el repo se renombró, gana el más reciente. */
+  /** Date of the data point that gave the name: if the repo was renamed, the most recent wins. */
   namedAt: string;
 }
 

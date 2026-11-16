@@ -1,5 +1,5 @@
-// Utilidades de las pruebas e2e: levantan `wrangler dev` aislado y firman tokens
-// de sesión con el SESSION_SECRET de .dev.vars.
+// e2e test utilities: start an isolated `wrangler dev` and sign session tokens with
+// the SESSION_SECRET from .dev.vars.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -16,14 +16,14 @@ export function readDevVars() {
   try {
     text = readFileSync(join(ROOT, ".dev.vars"), "utf8");
   } catch {
-    throw new Error("Falta .dev.vars: copia .dev.vars.example y pon un SESSION_SECRET");
+    throw new Error("Missing .dev.vars: copy .dev.vars.example and set a SESSION_SECRET");
   }
   const vars = {};
   for (const line of text.split("\n")) {
     const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
     if (match) vars[match[1]] = match[2].replace(/^"(.*)"$/, "$1");
   }
-  if (!vars.SESSION_SECRET) throw new Error(".dev.vars no tiene SESSION_SECRET");
+  if (!vars.SESSION_SECRET) throw new Error(".dev.vars has no SESSION_SECRET");
   return vars;
 }
 
@@ -46,9 +46,9 @@ function freePort() {
 }
 
 /**
- * Levanta `wrangler dev` con R2 local en un directorio temporal, o usa
- * CI_CACHE_URL si ya hay uno corriendo. `vars` se pasan con --var y tienen
- * prioridad sobre .dev.vars. Devuelve { url, log, stop }.
+ * Starts `wrangler dev` with local R2 in a temporary directory, or uses
+ * CI_CACHE_URL if one is already running. `vars` are passed with --var and take
+ * precedence over .dev.vars. Returns { url, log, stop }.
  */
 export async function startWorker({ vars = {} } = {}) {
   if (process.env.CI_CACHE_URL && Object.keys(vars).length === 0) {
@@ -91,16 +91,16 @@ export async function startWorker({ vars = {} } = {}) {
         };
       }
     } catch {
-      // aún no está listo
+      // not ready yet
     }
     if (child.exitCode !== null) break;
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   child.kill("SIGKILL");
-  throw new Error(`wrangler dev no arrancó:\n${output}`);
+  throw new Error(`wrangler dev did not start:\n${output}`);
 }
 
-/** Corre un comando y devuelve { code, stdout, stderr } (stdout+stderr también se imprimen si VERBOSE=1). */
+/** Runs a command and returns { code, stdout, stderr } (stdout+stderr are also printed if VERBOSE=1). */
 export function run(cmd, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], ...options });
@@ -124,6 +124,6 @@ export function randomRepoId() {
 }
 
 export function check(condition, message) {
-  if (!condition) throw new Error(`FALLÓ: ${message}`);
+  if (!condition) throw new Error(`FAILED: ${message}`);
   console.log(`  ok  ${message}`);
 }

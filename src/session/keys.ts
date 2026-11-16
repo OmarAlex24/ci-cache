@@ -2,9 +2,9 @@ import { constantTimeEqual, sha256Hex } from "../crypto.ts";
 import { HttpError } from "../errors.ts";
 
 /**
- * Llaves guardadas como hashes: `{ "<sha256 hex de la llave>": entrada }`. La llave en
- * claro nunca se guarda en el Worker. Se compara contra todas las entradas en tiempo
- * constante para no filtrar cuál existe.
+ * Keys stored as hashes: `{ "<sha256 hex of the key>": entry }`. The plaintext key is
+ * never stored in the Worker. It is compared against every entry in constant time so as
+ * not to leak which one exists.
  */
 export interface SandboxKeyEntry {
   repoId: number;
@@ -13,7 +13,7 @@ export interface SandboxKeyEntry {
 }
 
 const HASH = /^[0-9a-f]{64}$/u;
-const misconfigured = () => new HttpError(500, "misconfigured", "El servicio no está configurado");
+const misconfigured = () => new HttpError(500, "misconfigured", "The service is not configured");
 
 type Parsed<T> = { source: string; entries: [string, T][] };
 let sandboxCache: Parsed<SandboxKeyEntry> | undefined;
@@ -53,7 +53,7 @@ function sandboxEntries(source: string | undefined): [string, SandboxKeyEntry][]
   return sandboxCache.entries;
 }
 
-/** Busca una llave comparando su hash con todas las entradas, sin cortocircuito. */
+/** Looks up a key by comparing its hash with every entry, without short-circuiting. */
 export async function findKey<T>(entries: [string, T][], key: string): Promise<T | undefined> {
   const hash = await sha256Hex(key);
   let found: T | undefined;
@@ -68,8 +68,8 @@ export async function findSandboxKey(source: string | undefined, key: string): P
 }
 
 /**
- * Nombre de cada repo según SANDBOX_KEYS, para los puntos de métricas anteriores a que
- * guardaran el nombre. Nunca rompe /v1/stats: un secret mal formado da un mapa vacío.
+ * Each repo's name according to SANDBOX_KEYS, for metrics data points from before the name
+ * was stored. Never breaks /v1/stats: a malformed secret yields an empty map.
  */
 export function sandboxRepoNames(source: string | undefined): Map<number, string> {
   try {

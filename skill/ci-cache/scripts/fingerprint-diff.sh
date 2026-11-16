@@ -21,9 +21,10 @@ for f in "$1" "$2"; do [[ -r $f ]] || { echo "cannot read $f" >&2; exit 2; }; do
 # Raw fingerprint lines from a fingerprint file or a `gh run view --log` file.
 extract() {
   local file=$1
-  if grep -q $'\t.*== m.quina' "$file"; then
+  # The block starts at `== machine` (`== máquina` from actions pinned before the English output).
+  if grep -qE $'\t.*== (machine|m.quina)' "$file"; then
     awk -F'\t' -v want="${FP_JOB:-}" '
-      !found && index($0, "== m") && $0 ~ /== m.+quina/ && (want == "" || $1 == want) { found = 1; step = $1 FS $2 }
+      !found && index($0, "== m") && $0 ~ /== (machine|m.+quina)/ && (want == "" || $1 == want) { found = 1; step = $1 FS $2 }
       found {
         if (($1 FS $2) != step || index($0, "##[")) exit
         line = $0
@@ -39,13 +40,16 @@ extract() {
 # "section|label<TAB>value", one per line, secrets dropped.
 normalize() {
   awk '
-    /^== / { section = substr($0, 4); vars = (section ~ /^variables/); next }
+    # Old fingerprints (Spanish output) use `máquina` and `usuario`: map them to the English names.
+    /^== / { section = substr($0, 4); if (section ~ /^m.+quina$/) section = "machine"; vars = (section ~ /^variables/); next }
     {
       if (vars) { i = index($0, "="); if (!i) next; label = substr($0, 1, i - 1); value = substr($0, i + 1) }
       else { i = index($0, ":"); if (!i) next; label = substr($0, 1, i - 1); value = substr($0, i + 1) }
+      if (label == "usuario") label = "user"
       sub(/^[ \t]+/, "", value); sub(/[ \t]+$/, "", value)
       if (tolower(label) ~ /token|key|secret|passw/) next
-      if (value ~ /^npm (error|ERR)/) value = "(no instalado)"
+      if (value ~ /^npm (error|ERR)/ || value == "(no instalado)") value = "(not installed)"
+      if (value == "(sin rust-toolchain.toml)") value = "(no rust-toolchain.toml)"
       gsub(/(sk|rk)_[A-Za-z0-9_-]+/, "<redacted>", value)
       print (vars ? "env" : section) "|" label "\t" value
     }'

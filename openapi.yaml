@@ -2,20 +2,21 @@ openapi: 3.1.0
 info:
   title: ci-cache
   version: 0.1.0
-  summary: Caché de CI (Turbo y sccache) sobre Cloudflare R2, con niveles anti-envenenamiento.
+  summary: CI cache (Turbo and sccache) on Cloudflare R2, with anti-poisoning tiers.
   description: |
-    Worker de Cloudflare que guarda en R2 la caché de Turbo (Remote Cache API v8) y de
-    sccache (WebDAV), por repositorio. El nivel (`main`, `main-ro`, `rama`) sale de la
-    identidad del cliente, nunca de lo que pida.
+    Cloudflare Worker that stores the Turbo cache (Remote Cache API v8) and the sccache
+    cache (WebDAV) in R2, per repository. The tier (`main`, `main-ro`, `rama`) comes from
+    the client's identity, never from what it asks for. `rama` is the branch tier; its wire
+    value is the fixed identifier `rama`.
 
-    Flujo: el cliente cambia su credencial (OIDC de GitHub Actions o llave de sandbox) por
-    un token de sesión en `POST /v1/session` y usa ese token en `/v8/*` y `/dav/*`. Las
-    métricas (`/v1/stats*`) usan llaves de solo lectura aparte, que no sirven para la caché.
+    Flow: the client exchanges its credential (GitHub Actions OIDC or a sandbox key) for a
+    session token at `POST /v1/session` and uses that token on `/v8/*` and `/dav/*`. Metrics
+    (`/v1/stats*`) use separate read-only keys, which don't work for the cache.
 
-    Todos los errores son JSON `{ code, message }` sin detalles internos. Bajo `/v8/` el
-    error se repite como `error: { code, message }`, el formato que lee el cliente de turbo.
+    All errors are JSON `{ code, message }` with no internal details. Under `/v8/` the error
+    is repeated as `error: { code, message }`, the format the turbo client reads.
 
-    Tipos de Turbo adaptados del spec de
+    Turbo types adapted from the spec in
     [turborepo-remote-cache-cloudflare](https://github.com/AdiRishi/turborepo-remote-cache-cloudflare)
     (MIT, © 2023 Adishwar Rishi).
   license:
@@ -23,29 +24,29 @@ info:
     identifier: MIT
 servers:
   - url: https://ci-cache.example.workers.dev
-    description: Sustituye por la URL del Worker desplegado
+    description: Replace with the URL of your deployed Worker
   - url: http://localhost:8787
     description: wrangler dev
 
 tags:
-  - name: sesión
-    description: Cambiar una credencial (OIDC de GitHub o llave de sandbox) por un token de sesión.
+  - name: session
+    description: Exchange a credential (GitHub OIDC or a sandbox key) for a session token.
   - name: turbo
-    description: Remote Cache API v8 de Turborepo.
+    description: Turborepo Remote Cache API v8.
   - name: sccache
-    description: WebDAV mínimo para el backend webdav de sccache.
-  - name: métricas
-    description: Métricas de uso desde Workers Analytics Engine, con llave de solo lectura.
+    description: Minimal WebDAV for sccache's webdav backend.
+  - name: metrics
+    description: Usage metrics from Workers Analytics Engine, with a read-only key.
 
 paths:
   /health:
     get:
-      summary: Comprobación de vida (único endpoint sin token)
+      summary: Liveness check (the only endpoint without a token)
       operationId: health
       security: []
       responses:
         "200":
-          description: El Worker responde
+          description: The Worker is up
           content:
             application/json:
               schema:
@@ -56,23 +57,23 @@ paths:
 
   /v1/session:
     post:
-      tags: [sesión]
-      summary: Cambia una credencial por un token de sesión
+      tags: [session]
+      summary: Exchanges a credential for a session token
       operationId: createSession
       description: |
-        Con un token OIDC de GitHub Actions (`Authorization: Bearer <JWT>`) se verifica la
-        firma contra el JWKS de `https://token.actions.githubusercontent.com`, `iss`,
-        `aud == CACHE_AUDIENCE`, `exp`/`nbf` (30 s de margen) y que `repository_owner`
-        esté en `ALLOWED_OWNERS`. El nivel se decide en este orden:
+        With a GitHub Actions OIDC token (`Authorization: Bearer <JWT>`) it verifies the
+        signature against the JWKS of `https://token.actions.githubusercontent.com`, `iss`,
+        `aud == CACHE_AUDIENCE`, `exp`/`nbf` (30 s tolerance) and that `repository_owner`
+        is in `ALLOWED_OWNERS`. The tier is decided in this order:
 
-        1. `event_name` ∈ `MAIN_WRITE_EVENTS` y `ref` ∈ `MAIN_REFS` → `main`
-        2. `head_ref` no vacío (pull_request, pull_request_target) → `rama` = `head_ref`
+        1. `event_name` ∈ `MAIN_WRITE_EVENTS` and `ref` ∈ `MAIN_REFS` → `main`
+        2. non-empty `head_ref` (pull_request, pull_request_target) → `rama` = `head_ref`
         3. `ref` ∈ `MAIN_REFS` (schedule, workflow_dispatch, ...) → `main-ro`
-        4. cualquier otra ref → `rama` = nombre de la ref sin `refs/heads/`
+        4. any other ref → `rama` = the ref name without `refs/heads/`
 
-        Con una llave de sandbox (`Authorization: Bearer sk_...`) el cuerpo debe traer
-        `branch`; el nivel es SIEMPRE `rama`, aunque la rama se llame `main`. En el caso
-        OIDC el cuerpo se ignora.
+        With a sandbox key (`Authorization: Bearer sk_...`) the body must include `branch`;
+        the tier is ALWAYS `rama`, even if the branch is named `main`. In the OIDC case the
+        body is ignored.
       security:
         - githubOidc: []
         - sandboxKey: []
@@ -83,7 +84,7 @@ paths:
             schema: { $ref: "#/components/schemas/SessionRequest" }
       responses:
         "200":
-          description: Token de sesión emitido
+          description: Session token issued
           headers:
             Cache-Control:
               schema: { const: no-store }
@@ -93,13 +94,13 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
-          description: El dueño del repositorio no está en ALLOWED_OWNERS
+          description: The repository owner is not in ALLOWED_OWNERS
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "503":
-          description: No se pudo descargar el JWKS de GitHub; reintenta
+          description: Could not fetch GitHub's JWKS; retry
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -107,7 +108,7 @@ paths:
   /v8/artifacts/status:
     get:
       tags: [turbo]
-      summary: Estado de la caché remota
+      summary: Remote cache status
       operationId: getArtifactStatus
       security: [{ sessionToken: [] }]
       parameters:
@@ -115,7 +116,7 @@ paths:
         - $ref: "#/components/parameters/Slug"
       responses:
         "200":
-          description: Siempre `enabled` para un token válido
+          description: Always `enabled` for a valid token
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CachingStatusResponse" }
@@ -125,9 +126,9 @@ paths:
   /v8/artifacts:
     post:
       tags: [turbo]
-      summary: Consulta varios artefactos a la vez
+      summary: Queries several artifacts at once
       operationId: artifactQuery
-      description: Aplica el mismo fallback que GET por cada hash (nivel `rama` → su rama y luego main/). Hashes no hexadecimales devuelven `null`. Máximo 1000 hashes.
+      description: Applies the same fallback as GET for each hash (`rama` tier → its branch, then main/). Non-hex hashes return `null`. At most 1000 hashes.
       security: [{ sessionToken: [] }]
       parameters:
         - $ref: "#/components/parameters/TeamId"
@@ -139,7 +140,7 @@ paths:
             schema: { $ref: "#/components/schemas/ArtifactQueryRequest" }
       responses:
         "200":
-          description: Mapa hash → información o null
+          description: Map of hash → info or null
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ArtifactQueryResponse" }
@@ -150,7 +151,7 @@ paths:
   /v8/artifacts/events:
     post:
       tags: [turbo]
-      summary: Eventos de caché del cliente (se validan y se descartan)
+      summary: Client cache events (validated and discarded)
       operationId: recordEvents
       security: [{ sessionToken: [] }]
       parameters:
@@ -165,7 +166,7 @@ paths:
               maxItems: 10000
               items: { $ref: "#/components/schemas/CacheEvent" }
       responses:
-        "200": { description: "Eventos aceptados (cuerpo vacío)" }
+        "200": { description: "Events accepted (empty body)" }
         "400": { $ref: "#/components/responses/TurboBadRequest" }
         "401": { $ref: "#/components/responses/TurboUnauthorized" }
 
@@ -176,22 +177,22 @@ paths:
       - $ref: "#/components/parameters/Slug"
     get:
       tags: [turbo]
-      summary: Descarga un artefacto
+      summary: Downloads an artifact
       operationId: downloadArtifact
       description: |
-        Nivel `main` y `main-ro`: lee `main/<repoId>/turbo/<hash>`. Nivel `rama`: lee
-        `ramas/<repoId>/<branchKey>/turbo/<hash>` y, si no está, `main/<repoId>/turbo/<hash>`.
+        `main` and `main-ro` tiers: read `main/<repoId>/turbo/<hash>`. `rama` tier: reads
+        `ramas/<repoId>/<branchKey>/turbo/<hash>` and, if missing, `main/<repoId>/turbo/<hash>`.
       security: [{ sessionToken: [] }]
       responses:
         "200":
-          description: Artefacto
+          description: Artifact
           headers:
             Content-Length: { schema: { type: integer } }
             x-artifact-duration:
-              description: Duración de la tarea en ms, tal como se subió
+              description: Task duration in ms, as uploaded
               schema: { type: integer }
             x-artifact-tag:
-              description: Firma del artefacto, tal como se subió
+              description: Artifact signature, as uploaded
               schema: { type: string }
           content:
             application/octet-stream:
@@ -201,27 +202,27 @@ paths:
         "404": { $ref: "#/components/responses/TurboNotFound" }
     head:
       tags: [turbo]
-      summary: Comprueba si existe un artefacto (mismo fallback que GET)
+      summary: Checks whether an artifact exists (same fallback as GET)
       operationId: artifactExists
       security: [{ sessionToken: [] }]
       responses:
         "200":
-          description: Existe; mismas cabeceras que GET, sin cuerpo
+          description: Exists; same headers as GET, no body
           headers:
             Content-Length: { schema: { type: integer } }
             x-artifact-duration: { schema: { type: integer } }
             x-artifact-tag: { schema: { type: string } }
-        "400": { description: "Hash inválido" }
-        "401": { description: "Token ausente o inválido" }
-        "404": { description: "No existe" }
+        "400": { description: "Invalid hash" }
+        "401": { description: "Missing or invalid token" }
+        "404": { description: "Does not exist" }
     put:
       tags: [turbo]
-      summary: Sube un artefacto
+      summary: Uploads an artifact
       operationId: uploadArtifact
       description: |
-        Escribe en el prefijo del nivel (`main/` o la rama). `main-ro` recibe 403. El cuerpo
-        va en streaming a R2: exige `Content-Length` (411 si falta) y no puede superar
-        `MAX_ARTIFACT_BYTES` (100 MB por defecto, el tope de cuerpo de un Worker).
+        Writes to the tier's prefix (`main/` or the branch). `main-ro` gets 403. The body is
+        streamed to R2: it requires `Content-Length` (411 if missing) and cannot exceed
+        `MAX_ARTIFACT_BYTES` (100 MB by default, a Worker's request body limit).
       security: [{ sessionToken: [] }]
       parameters:
         - name: Content-Length
@@ -241,24 +242,24 @@ paths:
             schema: { type: string, contentMediaType: application/octet-stream }
       responses:
         "202":
-          description: Guardado
+          description: Stored
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ArtifactUploadResponse" }
         "400": { $ref: "#/components/responses/TurboBadRequest" }
         "401": { $ref: "#/components/responses/TurboUnauthorized" }
         "403":
-          description: El token es de solo lectura (main-ro)
+          description: The token is read-only (main-ro)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TurboError" }
         "411":
-          description: Falta Content-Length
+          description: Missing Content-Length
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TurboError" }
         "413":
-          description: Supera MAX_ARTIFACT_BYTES
+          description: Exceeds MAX_ARTIFACT_BYTES
           content:
             application/json:
               schema: { $ref: "#/components/schemas/TurboError" }
@@ -269,26 +270,26 @@ paths:
         in: path
         required: true
         description: |
-          Ruta de sccache, p. ej. `.sccache_check` o `8/e/f/<hash>`. Segmentos
-          `[A-Za-z0-9._-]{1,128}`, sin `.` ni `..`, 512 caracteres como máximo. Se toleran
-          barras repetidas.
+          sccache path, e.g. `.sccache_check` or `8/e/f/<hash>`. Segments
+          `[A-Za-z0-9._-]{1,128}`, no `.` or `..`, at most 512 characters. Repeated
+          slashes are tolerated.
         schema: { type: string }
     description: |
-      WebDAV mínimo para el backend `webdav` de sccache (probado con sccache 0.19.0).
-      Además de GET y PUT, acepta **PROPFIND** (OpenAPI 3.1 no puede declarar ese método
-      como operación): solo con `Depth: 0` y solo sobre directorios (ruta terminada en `/`,
-      incluido `/dav/`), responde `207 Multi-Status` con `<D:collection/>` y
-      `<D:getlastmodified>`. `Depth` distinto de 0 → 403 (no hay listados); sobre un archivo
-      → 404. Cualquier otro método → 405.
+      Minimal WebDAV for sccache's `webdav` backend (tested with sccache 0.19.0).
+      Besides GET and PUT, it accepts **PROPFIND** (OpenAPI 3.1 cannot declare that method
+      as an operation): only with `Depth: 0` and only on directories (a path ending in `/`,
+      including `/dav/`), it answers `207 Multi-Status` with `<D:collection/>` and
+      `<D:getlastmodified>`. `Depth` other than 0 → 403 (no listings); on a file → 404.
+      Any other method → 405.
     x-webdav-methods: [GET, HEAD, PUT, PROPFIND]
     get:
       tags: [sccache]
-      summary: Lee un objeto (fallback rama → main/)
+      summary: Reads an object (branch → main/ fallback)
       operationId: davGet
       security: [{ sessionToken: [] }]
       responses:
         "200":
-          description: Objeto
+          description: Object
           content:
             application/octet-stream:
               schema: { type: string, contentMediaType: application/octet-stream }
@@ -297,7 +298,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [sccache]
-      summary: Escribe un objeto en el prefijo del nivel
+      summary: Writes an object to the tier's prefix
       operationId: davPut
       security: [{ sessionToken: [] }]
       parameters:
@@ -311,32 +312,32 @@ paths:
           application/octet-stream:
             schema: { type: string, contentMediaType: application/octet-stream }
       responses:
-        "201": { description: "Guardado" }
+        "201": { description: "Stored" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
-          description: Token de solo lectura (main-ro); sccache pasa a modo solo lectura
+          description: Read-only token (main-ro); sccache switches to read-only mode
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
-        "411": { description: "Falta Content-Length" }
+        "411": { description: "Missing Content-Length" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
 
   /v1/stats:
     get:
-      tags: [métricas]
-      summary: Aciertos, fallos, bytes y tiempo ahorrado de un repositorio
+      tags: [metrics]
+      summary: Hits, misses, bytes and time saved for a repository
       operationId: getStats
       description: |
-        Consulta Workers Analytics Engine (API SQL) con `CF_ACCOUNT_ID` y `CF_API_TOKEN`.
-        Los conteos usan `SUM(_sample_interval)`, así que son estimaciones si AE muestreó.
+        Queries Workers Analytics Engine (SQL API) with `CF_ACCOUNT_ID` and `CF_API_TOKEN`.
+        Counts use `SUM(_sample_interval)`, so they are estimates if AE sampled.
       security: [{ statsKey: [] }]
       parameters:
         - $ref: "#/components/parameters/Repo"
         - $ref: "#/components/parameters/Range"
       responses:
         "200":
-          description: Métricas agregadas
+          description: Aggregated metrics
           headers:
             Cache-Control:
               schema: { const: no-store }
@@ -346,7 +347,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
-          description: La llave está limitada a otros repositorios
+          description: The key is limited to other repositories
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -355,22 +356,22 @@ paths:
 
   /v1/stats/branches:
     get:
-      tags: [métricas]
-      summary: Reutilización por rama de lo que escribió el sandbox
+      tags: [metrics]
+      summary: Per-branch reuse of what the sandbox wrote
       operationId: getBranchStats
       description: |
-        Por rama (solo nivel `rama`): escrituras del sandbox, lecturas y aciertos de la CI,
-        y aciertos de la CI sobre objetos escritos por el sandbox. `reuseAlert` es `true`
-        cuando el sandbox escribió al menos `REUSE_ALERT_MIN_WRITES` objetos y la CI no
-        acertó ninguno de ellos: casi siempre significa que algo difiere entre el sandbox
-        y la CI (ruta del checkout, toolchain, banderas). Ver `scripts/cache-fingerprint.sh`.
+        Per branch (`rama` tier only): sandbox writes, CI reads and hits, and CI hits on
+        objects the sandbox wrote. `reuseAlert` is `true` when the sandbox wrote at least
+        `REUSE_ALERT_MIN_WRITES` objects and CI hit none of them: it almost always means
+        something differs between the sandbox and CI (checkout path, toolchain, flags).
+        See `scripts/cache-fingerprint.sh`.
       security: [{ statsKey: [] }]
       parameters:
         - $ref: "#/components/parameters/Repo"
         - $ref: "#/components/parameters/Range"
       responses:
         "200":
-          description: Métricas por rama
+          description: Per-branch metrics
           headers:
             Cache-Control:
               schema: { const: no-store }
@@ -380,7 +381,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
-          description: La llave está limitada a otros repositorios
+          description: The key is limited to other repositories
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -389,22 +390,22 @@ paths:
 
   /v1/stats/repos:
     get:
-      tags: [métricas]
-      summary: Los repositorios con tráfico en el rango, con sus totales
+      tags: [metrics]
+      summary: The repositories with traffic in the range, with their totals
       operationId: getRepoStats
       description: |
-        Para que un frontend no necesite saber los ids de antemano. Dos consultas a la API SQL
-        de Analytics Engine: los totales por repo (con la última petición) y las ramas de
-        nivel `rama`, para contar los `reuseAlert` de cada repo con la misma regla que
-        `/v1/stats/branches`. Una llave con `repoIds` solo ve esos repos (filtra; no da 403).
-        `repo` sale de los puntos (desde que guardan `blob8`) y, para los puntos anteriores,
-        de `SANDBOX_KEYS`; si nadie lo sabe, `null`.
+        So a frontend doesn't need to know the ids in advance. Two queries to the Analytics
+        Engine SQL API: the totals per repo (with the latest request) and the `rama`-tier
+        branches, to count each repo's `reuseAlert`s with the same rule as
+        `/v1/stats/branches`. A key with `repoIds` only sees those repos (it filters; no 403).
+        `repo` comes from the data points (since they store `blob8`) and, for older points,
+        from `SANDBOX_KEYS`; if nobody knows it, `null`.
       security: [{ statsKey: [] }]
       parameters:
         - $ref: "#/components/parameters/Range"
       responses:
         "200":
-          description: Repos ordenados por la última petición, de la más reciente a la más vieja
+          description: Repos sorted by latest request, most recent first
           headers:
             Cache-Control:
               schema: { const: no-store }
@@ -422,42 +423,42 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Token OIDC de GitHub Actions con `aud = CACHE_AUDIENCE` (requiere `permissions.id-token = write`).
+      description: GitHub Actions OIDC token with `aud = CACHE_AUDIENCE` (requires `permissions.id-token = write`).
     sandboxKey:
       type: http
       scheme: bearer
-      description: Llave de sandbox `sk_...`; el Worker solo guarda su sha256 en `SANDBOX_KEYS`.
+      description: Sandbox key `sk_...`; the Worker only stores its sha256 in `SANDBOX_KEYS`.
     sessionToken:
       type: http
       scheme: bearer
-      description: Token de sesión emitido por `POST /v1/session` (`base64url(claims).base64url(HMAC-SHA256)`).
+      description: Session token issued by `POST /v1/session` (`base64url(claims).base64url(HMAC-SHA256)`).
     statsKey:
       type: http
       scheme: bearer
-      description: Llave de solo lectura `rk_...` de `STATS_KEYS`; no sirve para la caché.
+      description: Read-only key `rk_...` from `STATS_KEYS`; doesn't work for the cache.
 
   parameters:
     ArtifactHash:
       name: hash
       in: path
       required: true
-      description: Hash hexadecimal del artefacto (1–128 caracteres).
+      description: Hex hash of the artifact (1–128 characters).
       schema: { type: string, pattern: "^[0-9a-fA-F]{1,128}$" }
     TeamId:
       name: teamId
       in: query
-      description: Se acepta por compatibilidad con turbo pero NO decide el prefijo (lo decide el token).
+      description: Accepted for turbo compatibility but does NOT decide the prefix (the token does).
       schema: { type: string, maxLength: 256 }
     Slug:
       name: slug
       in: query
-      description: Se acepta por compatibilidad con turbo pero NO decide el prefijo.
+      description: Accepted for turbo compatibility but does NOT decide the prefix.
       schema: { type: string, maxLength: 256 }
     Repo:
       name: repo
       in: query
       required: true
-      description: Id numérico del repositorio de GitHub (no el nombre).
+      description: Numeric id of the GitHub repository (not its name).
       schema: { type: string, pattern: "^[1-9][0-9]{0,15}$" }
     Range:
       name: range
@@ -469,47 +470,47 @@ components:
 
   responses:
     BadRequest:
-      description: Entrada inválida
+      description: Invalid input
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     Unauthorized:
-      description: Token ausente o inválido
+      description: Missing or invalid token
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     NotFound:
-      description: No encontrado
+      description: Not found
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     PayloadTooLarge:
-      description: Cuerpo demasiado grande
+      description: Body too large
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     TurboBadRequest:
-      description: Entrada inválida
+      description: Invalid input
       content:
         application/json:
           schema: { $ref: "#/components/schemas/TurboError" }
     TurboUnauthorized:
-      description: Token ausente o inválido
+      description: Missing or invalid token
       content:
         application/json:
           schema: { $ref: "#/components/schemas/TurboError" }
     TurboNotFound:
-      description: Artefacto no encontrado en ninguno de los prefijos que puede leer el token
+      description: Artifact not found in any of the prefixes the token can read
       content:
         application/json:
           schema: { $ref: "#/components/schemas/TurboError" }
     AnalyticsUnavailable:
-      description: Analytics Engine no respondió bien
+      description: Analytics Engine did not answer correctly
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
     MetricsNotConfigured:
-      description: Faltan CF_ACCOUNT_ID o CF_API_TOKEN
+      description: CF_ACCOUNT_ID or CF_API_TOKEN is missing
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -522,7 +523,7 @@ components:
         code: { type: string, examples: [unauthorized] }
         message: { type: string }
     TurboError:
-      description: "`Error` repetido dentro de `error`, que es lo que lee el cliente de turbo."
+      description: "`Error` repeated inside `error`, which is what the turbo client reads."
       allOf:
         - $ref: "#/components/schemas/Error"
         - type: object
@@ -533,9 +534,10 @@ components:
       type: string
       enum: [main, main-ro, rama]
       description: |
-        - `main`: lee y escribe `main/<repoId>/`.
-        - `main-ro`: solo lee `main/<repoId>/`.
-        - `rama`: lee y escribe `ramas/<repoId>/<branchKey>/`; en un fallo de lectura cae a `main/`.
+        - `main`: reads and writes `main/<repoId>/`.
+        - `main-ro`: only reads `main/<repoId>/`.
+        - `rama` (the branch tier; `rama` is a fixed wire value): reads and writes
+          `ramas/<repoId>/<branchKey>/`; on a read miss it falls back to `main/`.
     SessionKind:
       type: string
       enum: [ci, sandbox]
@@ -546,12 +548,12 @@ components:
           type: string
           minLength: 1
           maxLength: 255
-          description: Solo con llave de sandbox. Rama de git (sin espacios, controles, `~^:?*[\`, `..`, ni `/` al inicio o al final).
+          description: Sandbox key only. A git branch (no spaces, control characters, `~^:?*[\`, `..`, or leading or trailing `/`).
     SessionResponse:
       type: object
       required: [token, expiresAt, repoId, repo, tier, branch, kind]
       properties:
-        token: { type: string, description: "Token de sesión para /v8 y /dav" }
+        token: { type: string, description: "Session token for /v8 and /dav" }
         expiresAt: { type: string, format: date-time }
         repoId: { type: integer }
         repo: { type: string, examples: [OmarAlex24/horizon-stack] }
@@ -606,17 +608,17 @@ components:
       type: object
       required: [requests, hits, hitsFromMain, misses, writes, bytesRead, bytesWritten, timeSavedMs, hitRate]
       properties:
-        requests: { type: number, description: "Lecturas (GET) + escrituras (PUT) de objetos" }
-        hits: { type: number, description: "Aciertos, incluidos los servidos desde main/" }
-        hitsFromMain: { type: number, description: "Aciertos de nivel rama servidos desde main/" }
+        requests: { type: number, description: "Object reads (GET) + writes (PUT)" }
+        hits: { type: number, description: "Hits, including those served from main/" }
+        hitsFromMain: { type: number, description: "rama-tier hits served from main/" }
         misses: { type: number }
         writes: { type: number }
-        bytesRead: { type: number, description: "Bytes servidos en aciertos" }
+        bytesRead: { type: number, description: "Bytes served on hits" }
         bytesWritten: { type: number }
-        timeSavedMs: { type: number, description: "Suma de x-artifact-duration de los aciertos (solo Turbo la reporta)" }
+        timeSavedMs: { type: number, description: "Sum of x-artifact-duration of the hits (only Turbo reports it)" }
         hitRate:
           type: [number, "null"]
-          description: hits / (hits + misses), con 4 decimales; null sin lecturas
+          description: hits / (hits + misses), with 4 decimals; null with no reads
     StatsResponse:
       type: object
       required: [repoId, range, generatedAt, totals, byTier, byKind, byProtocol]
@@ -649,10 +651,10 @@ components:
       required: [branch, sandboxWrites, ciReads, ciHits, ciHitsOnSandboxObjects, reuseAlert]
       properties:
         branch: { type: string }
-        sandboxWrites: { type: number, description: "Objetos que escribió el sandbox en la rama" }
-        ciReads: { type: number, description: "Lecturas de la CI en la rama (aciertos + fallos)" }
-        ciHits: { type: number, description: "Aciertos de la CI (de la rama o de main/)" }
-        ciHitsOnSandboxObjects: { type: number, description: "Aciertos de la CI sobre objetos escritos por el sandbox" }
+        sandboxWrites: { type: number, description: "Objects the sandbox wrote on the branch" }
+        ciReads: { type: number, description: "CI reads on the branch (hits + misses)" }
+        ciHits: { type: number, description: "CI hits (from the branch or from main/)" }
+        ciHitsOnSandboxObjects: { type: number, description: "CI hits on objects the sandbox wrote" }
         reuseAlert: { type: boolean }
     BranchesResponse:
       type: object
@@ -664,7 +666,7 @@ components:
         reuseAlertMinWrites: { type: integer }
         branches:
           type: array
-          description: Ordenadas por escrituras del sandbox, de mayor a menor
+          description: Sorted by sandbox writes, highest first
           items: { $ref: "#/components/schemas/BranchStats" }
     RepoStats:
       type: object
@@ -673,14 +675,14 @@ components:
         repoId: { type: integer }
         repo:
           type: [string, "null"]
-          description: "`owner/repo`; null si ni los puntos ni SANDBOX_KEYS lo saben"
+          description: "`owner/repo`; null if neither the data points nor SANDBOX_KEYS know it"
           examples: [OmarAlex24/horizon-stack]
         lastSeenAt:
           type: [string, "null"]
           format: date-time
-          description: La petición de caché más reciente del rango
+          description: The most recent cache request in the range
         totals: { $ref: "#/components/schemas/Counters" }
-        reuseAlerts: { type: integer, description: "Ramas del repo con reuseAlert en el rango" }
+        reuseAlerts: { type: integer, description: "The repo's branches with reuseAlert in the range" }
     ReposResponse:
       type: object
       required: [range, generatedAt, reuseAlertMinWrites, repos]

@@ -8,16 +8,16 @@ import type { Tier } from "./token.ts";
 export const GITHUB_OIDC_ISSUER = "https://token.actions.githubusercontent.com";
 
 /**
- * JWKS de GitHub, cacheado a nivel de módulo (vive lo que viva el isolate). jose
- * reutiliza las llaves hasta `cacheMaxAge` y solo vuelve a pedirlas si llega un `kid`
- * desconocido, como mucho una vez cada `cooldownDuration`.
+ * GitHub's JWKS, cached at module level (it lives as long as the isolate). jose reuses
+ * the keys until `cacheMaxAge` and only fetches them again when an unknown `kid` arrives,
+ * at most once every `cooldownDuration`.
  */
 export const githubJwks: JWTVerifyGetKey = createRemoteJWKSet(
   new URL(`${GITHUB_OIDC_ISSUER}/.well-known/jwks`),
   { cacheMaxAge: 10 * 60 * 1000, cooldownDuration: 30 * 1000, timeoutDuration: 5000 },
 );
 
-/** Margen de reloj para `exp`/`nbf`/`iat`, en segundos. */
+/** Clock tolerance for `exp`/`nbf`/`iat`, in seconds. */
 const CLOCK_TOLERANCE_SECONDS = 30;
 
 export interface CiIdentity {
@@ -50,17 +50,17 @@ export async function verifyGithubOidc(
       ...(currentDate ? { currentDate } : {}),
     }));
   } catch (error) {
-    // Fallos de red al pedir el JWKS no son culpa del cliente.
+    // Network failures while fetching the JWKS are not the client's fault.
     if (error instanceof joseErrors.JWKSTimeout || !(error instanceof joseErrors.JOSEError)) {
-      throw new HttpError(503, "jwks_unavailable", "No se pudo verificar el token, reintenta");
+      throw new HttpError(503, "jwks_unavailable", "Could not verify the token, retry");
     }
     throw unauthorized();
   }
 
   const owner = stringClaim(payload, "repository_owner");
-  if (!config.allowedOwners.has(owner.toLowerCase())) throw forbidden("Repositorio no permitido");
+  if (!config.allowedOwners.has(owner.toLowerCase())) throw forbidden("Repository not allowed");
 
-  // GitHub manda repository_id como cadena.
+  // GitHub sends repository_id as a string.
   const repoIdText = stringClaim(payload, "repository_id");
   if (!/^[1-9][0-9]{0,15}$/u.test(repoIdText)) throw unauthorized();
   const repoId = Number(repoIdText);

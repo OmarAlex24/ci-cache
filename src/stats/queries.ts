@@ -1,8 +1,8 @@
 import { COLUMNS } from "../metrics/record.ts";
 import { SESSION_KINDS, TIERS } from "../session/token.ts";
 
-// Generan el SQL de /v1/stats y le dan forma a las filas. Solo se interpolan valores
-// ya validados: repoId entero, rango de una lista fija y nombre de dataset validado.
+// Build the /v1/stats SQL and shape the rows. Only already-validated values are
+// interpolated: an integer repoId, a range from a fixed list and a validated dataset name.
 
 export const RANGES = {
   "1h": [1, "HOUR"],
@@ -19,7 +19,7 @@ export function isRange(value: string): value is Range {
 }
 
 function assertRepoId(repoId: number): void {
-  if (!Number.isSafeInteger(repoId) || repoId <= 0) throw new Error("repoId inválido");
+  if (!Number.isSafeInteger(repoId) || repoId <= 0) throw new Error("invalid repoId");
 }
 
 export function since(range: Range): string {
@@ -32,7 +32,7 @@ function where(repoId: number, range: Range): string {
   return `index1 = '${repoId}' AND ${since(range)}`;
 }
 
-/** `index1 = 'a' OR …` entre paréntesis; sin lista, nada (la llave ve todos los repos). */
+/** `index1 = 'a' OR …` in parentheses; without a list, nothing (the key sees every repo). */
 export function repoFilter(repoIds: readonly number[] | undefined): string {
   if (repoIds === undefined) return "";
   if (repoIds.length === 0) return " AND 1 = 0";
@@ -40,7 +40,7 @@ export function repoFilter(repoIds: readonly number[] | undefined): string {
   return ` AND (${repoIds.map((id) => `index1 = '${id}'`).join(" OR ")})`;
 }
 
-/** Peticiones, bytes y duración guardada por nivel × kind × protocolo × resultado. */
+/** Requests, bytes and stored duration by tier × kind × protocol × result. */
 export function statsSql(dataset: string, repoId: number, range: Range): string {
   return [
     `SELECT ${COLUMNS.tier} AS tier, ${COLUMNS.kind} AS kind, ${COLUMNS.protocol} AS protocol, ${COLUMNS.result} AS result,`,
@@ -54,7 +54,7 @@ export function statsSql(dataset: string, repoId: number, range: Range): string 
   ].join("\n");
 }
 
-/** Por rama (nivel rama): escrituras y lecturas por kind, resultado y quién escribió lo leído. */
+/** Per branch (branch tier, `rama`): writes and reads by kind, result and who wrote what was read. */
 export function branchesSql(dataset: string, repoId: number, range: Range): string {
   return [
     `SELECT ${COLUMNS.branch} AS branch, ${COLUMNS.kind} AS kind, ${COLUMNS.result} AS result, ${COLUMNS.writerKind} AS writer_kind,`,
@@ -70,17 +70,17 @@ export function branchesSql(dataset: string, repoId: number, range: Range): stri
 
 export interface Counters {
   requests: number;
-  /** Aciertos totales (incluye los que vinieron de main/). */
+  /** Total hits (including those served from main/). */
   hits: number;
-  /** Aciertos de una rama servidos desde main/. */
+  /** A branch's hits served from main/. */
   hitsFromMain: number;
   misses: number;
   writes: number;
   bytesRead: number;
   bytesWritten: number;
-  /** Suma de la duración guardada de los artefactos acertados (solo Turbo la reporta). */
+  /** Sum of the stored duration of the artifacts hit (only Turbo reports it). */
   timeSavedMs: number;
-  /** hits / (hits + misses); null sin lecturas. */
+  /** hits / (hits + misses); null with no reads. */
   hitRate: number | null;
 }
 
@@ -144,15 +144,15 @@ export function shapeStats(rows: Record<string, unknown>[]) {
 
 export interface BranchStats {
   branch: string;
-  /** Objetos que escribió el sandbox en la rama. */
+  /** Objects the sandbox wrote on the branch. */
   sandboxWrites: number;
-  /** Lecturas de la CI en la rama (aciertos + fallos). */
+  /** CI reads on the branch (hits + misses). */
   ciReads: number;
-  /** Aciertos de la CI (de la rama o de main/). */
+  /** CI hits (from the branch or from main/). */
   ciHits: number;
-  /** Aciertos de la CI sobre objetos que escribió el sandbox: la reutilización que buscamos. */
+  /** CI hits on objects the sandbox wrote: the reuse we are after. */
   ciHitsOnSandboxObjects: number;
-  /** El sandbox escribió ≥ N y la CI no aprovechó ninguno: algo difiere entre ambos (ruta, toolchain, banderas). */
+  /** The sandbox wrote ≥ N and CI reused none: something differs between them (path, toolchain, flags). */
   reuseAlert: boolean;
 }
 

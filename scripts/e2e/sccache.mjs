@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// e2e con sccache real (backend webdav) contra `wrangler dev` y R2 local:
-//   1. sandbox (rama X) compila: fallos, escribe en ramas/
-//   2. CI de PR de la rama X, con target/ limpio: aciertos
-//   3. CI de main (push): NO lee la rama, falla y escribe en main/
-//   4. CI de una rama nueva: aciertos desde main/
-//   5. main-ro: sccache queda en solo lectura y acierta desde main/
-// Al final imprime los verbos WebDAV que vio el Worker.
+// e2e with real sccache (webdav backend) against `wrangler dev` and local R2:
+//   1. sandbox (branch X) builds: misses, writes to ramas/
+//   2. PR CI on branch X, with a clean target/: hits
+//   3. main CI (push): does NOT read the branch, misses and writes to main/
+//   4. CI on a new branch: hits from main/
+//   5. main-ro: sccache goes read-only and hits from main/
+// At the end it prints the WebDAV verbs the Worker saw.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,7 +39,7 @@ function freePort() {
   });
 }
 
-// Quita los códigos de color ANSI del log de wrangler.
+// Strips ANSI color codes from the wrangler log.
 const stripAnsi = (text) => text.replaceAll(String.fromCharCode(27), "").replace(/\[[0-9;]*m/g, "");
 const sum = (counts) => Object.values(counts ?? {}).reduce((a, b) => a + b, 0);
 
@@ -49,7 +49,7 @@ async function build(dir, url, token, serverPort) {
     SCCACHE_SERVER_PORT: String(serverPort),
     SCCACHE_WEBDAV_ENDPOINT: `${url}/dav`,
     SCCACHE_WEBDAV_TOKEN: token,
-    // Como lo exportan setup.sh y ci-cache-env.sh: sin PROPFIND antes de cada PUT.
+    // As setup.sh and ci-cache-env.sh export it: no PROPFIND before every PUT.
     SCCACHE_WEBDAV_DISABLE_CREATE_DIR: "true",
     SCCACHE_DIR: join(dir, ".sccache-local"),
     RUSTC_WRAPPER: "sccache",
@@ -57,10 +57,10 @@ async function build(dir, url, token, serverPort) {
     CARGO_TARGET_DIR: join(dir, "target"),
   };
   delete env.SCCACHE_LOG;
-  // El servidor de sccache se queda con el entorno con que arrancó: reiniciarlo por identidad.
+  // The sccache server keeps the environment it started with: restart it per identity.
   await run("sccache", ["--stop-server"], { env });
   const started = await run("sccache", ["--start-server"], { env });
-  if (started.code !== 0) throw new Error(`sccache no arrancó: ${started.stderr}`);
+  if (started.code !== 0) throw new Error(`sccache did not start: ${started.stderr}`);
   rmSync(join(dir, "target"), { recursive: true, force: true });
   const cargo = await run("cargo", ["build", "--quiet"], { cwd: dir, env });
   const json = JSON.parse((await run("sccache", ["--show-stats", "--stats-format=json"], { env })).stdout);
@@ -90,32 +90,32 @@ try {
   const id = (tier, b, kind) => mintSession({ repoId, repo: REPO, tier, branch: b, kind });
   const show = (r) => console.log(`  hits=${r.hits} misses=${r.misses} writes=${r.writes} write_errors=${r.writeErrors} mode=${JSON.stringify(r.mode)}`);
 
-  console.log("1. sandbox compila en su rama");
+  console.log("1. sandbox builds on its branch");
   let r = await build(dir, worker.url, await id("rama", branch, "sandbox"), serverPort);
   show(r);
-  check(r.ok, "cargo build termina bien");
-  check(r.misses >= 2 && r.hits === 0 && r.writeErrors === 0 && r.writes >= 2, "sandbox: todo fallos y escribe sin errores");
+  check(r.ok, "cargo build exits cleanly");
+  check(r.misses >= 2 && r.hits === 0 && r.writeErrors === 0 && r.writes >= 2, "sandbox: all misses and writes without errors");
 
-  console.log("2. CI de PR de la misma rama, target/ limpio");
+  console.log("2. PR CI on the same branch, clean target/");
   r = await build(dir, worker.url, await id("rama", branch, "ci"), serverPort);
   show(r);
-  check(r.ok && r.hits >= 2 && r.misses === 0, "PR: todo aciertos (lo escrito por el sandbox)");
+  check(r.ok && r.hits >= 2 && r.misses === 0, "PR: all hits (what the sandbox wrote)");
 
-  console.log("3. CI de main (push)");
+  console.log("3. main CI (push)");
   r = await build(dir, worker.url, await id("main", "main", "ci"), serverPort);
   show(r);
-  check(r.ok && r.hits === 0 && r.misses >= 2 && r.writes >= 2, "main: no lee la rama, falla y escribe en main/");
+  check(r.ok && r.hits === 0 && r.misses >= 2 && r.writes >= 2, "main: doesn't read the branch, misses and writes to main/");
 
-  console.log("4. CI de una rama nueva");
-  r = await build(dir, worker.url, await id("rama", `feature/otra-${repoId}`, "ci"), serverPort);
+  console.log("4. CI on a new branch");
+  r = await build(dir, worker.url, await id("rama", `feature/other-${repoId}`, "ci"), serverPort);
   show(r);
-  check(r.ok && r.hits >= 2 && r.misses === 0, "rama nueva: aciertos desde main/");
+  check(r.ok && r.hits >= 2 && r.misses === 0, "new branch: hits from main/");
 
   console.log("5. main-ro (schedule)");
   r = await build(dir, worker.url, await id("main-ro", "main", "ci"), serverPort);
   show(r);
-  check(r.ok && r.hits >= 2 && r.writes === 0, "main-ro: lee main/ y no escribe");
-  check(JSON.stringify(r.mode).includes("ReadOnly"), "main-ro: sccache detecta solo lectura");
+  check(r.ok && r.hits >= 2 && r.writes === 0, "main-ro: reads main/ and doesn't write");
+  check(JSON.stringify(r.mode).includes("ReadOnly"), "main-ro: sccache detects read-only");
 
   const verbs = new Map();
   for (const line of worker.log().split("\n")) {
@@ -125,10 +125,10 @@ try {
     const key = `${match[1]} ${shape} ${match[3]}`;
     verbs.set(key, (verbs.get(key) ?? 0) + 1);
   }
-  console.log("verbos WebDAV vistos por el Worker:");
+  console.log("WebDAV verbs seen by the Worker:");
   for (const [key, count] of [...verbs].sort()) console.log(`  ${String(count).padStart(3)}  ${key}`);
-  check(![...verbs.keys()].some((k) => k.endsWith(" 405")), "ningún verbo sin implementar (405)");
-  check(![...verbs.keys()].some((k) => k.startsWith("PROPFIND ")), "sin PROPFIND (SCCACHE_WEBDAV_DISABLE_CREATE_DIR)");
+  check(![...verbs.keys()].some((k) => k.endsWith(" 405")), "no unimplemented verb (405)");
+  check(![...verbs.keys()].some((k) => k.startsWith("PROPFIND ")), "no PROPFIND (SCCACHE_WEBDAV_DISABLE_CREATE_DIR)");
   console.log("e2e sccache: OK");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
