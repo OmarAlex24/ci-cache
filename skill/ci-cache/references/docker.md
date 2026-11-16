@@ -103,10 +103,10 @@ fall back to a full build when they differ:
 Afterwards, check that both images contain the same binary by comparing
 `sha256sum` inside each one.
 
-In klav, this removed the second release compile (79–154 s). A change to
-the build stage, such as a narrower `COPY`, goes into both Dockerfiles with
-the same lines, or the comparison stops matching and the variant compiles
-again (#240).
+In the first rollout, this removed the second release compile (79–154 s).
+A change to the build stage, such as a narrower `COPY`, goes into both
+Dockerfiles with the same lines, or the comparison stops matching and the
+variant compiles again.
 
 ## Keep the build context stable
 
@@ -128,7 +128,7 @@ context. One changed file invalidates the compile layer.
 
 ## Narrowing the build stage's COPY: check before you count on it
 
-klav #240 replaced the build stage's `COPY . .` with `Cargo.toml`,
+The first rollout replaced the build stage's `COPY . .` with `Cargo.toml`,
 `Cargo.lock` and `crates/`. `.dockerignore` stayed as it was: it still
 keeps the context small, and the runtime stages still copy files from
 outside `crates/` (an entrypoint script).
@@ -138,15 +138,15 @@ outside `crates/` (an entrypoint script).
   recompile in 149–331 s (n=4, fast machines).
 - **How often it pays**: less than it sounds in a Rust-heavy repo, where
   most commits touch the crates anyway. On main's last 80 commits the old
-  context changed in 45 and the new one in 38: 7 fewer recompiles. Of the
-  60 PRs merged since 2026-11-01, 29 against 23.
+  context changed in 45 and the new one in 38: 7 fewer recompiles. Over
+  the last 60 merged PRs, 29 against 23.
 - **Narrower still**: copying only the server's own crates, with stub
   manifests for the other workspace members, would avoid 22 of those 45.
   It needs an extra stage in each Dockerfile and a list to keep in sync,
-  so klav left it as a possible follow-up.
+  so it was left as a possible follow-up.
 
 Before you narrow:
-1. **Check what actually invalidates the layer.** klav's `.dockerignore`
+1. **Check what actually invalidates the layer.** There, `.dockerignore`
    already excluded `apps/` and `.github/`, so changes there never rebuilt
    the image. What did were `scripts/`, `deploy/`, `packages/` and root
    files.
@@ -173,7 +173,7 @@ Before you narrow:
 
 A PR that changes how an image is built, but shouldn't change what it
 contains, proves it in CI with a temporary commit that a later commit
-reverts (`measurement.md`). klav #240 did it in run 42633937575:
+reverts (`measurement.md`). The first rollout did it like this:
 
 1. **Rebuild the old image first**: the default branch's Dockerfiles on
    the same context (`git archive HEAD` into a directory), reading the
@@ -207,16 +207,16 @@ reverts (`measurement.md`). klav #240 did it in run 42633937575:
    compiles.
 
 This works only if the build is reproducible: the new image's binary is
-compiled fresh. In klav, main's runs 42388053989 and 42383567148 had
-compiled the same `klav-server` independently. The result: 8,194 identical
+compiled fresh. In the first rollout, two runs on main had compiled the
+same `app-server` independently. The result: 8,194 identical
 lines for the root image and 8,196 for Railway's, the same config, and the
 same binary hash in all four images. A change in `scripts/` left the
-compile layer `CACHED`, and a change in `crates/klav-server/src/main.rs`
+compile layer `CACHED`, and a change in `crates/app-server/src/main.rs`
 compiled.
 
 ## Costs and numbers
 
-From klav, `docker` task seconds:
+From the first rollout, `docker` task seconds:
 
 | Scenario | Task | Notes |
 | --- | ---: | --- |
@@ -224,10 +224,10 @@ From klav, `docker` task seconds:
 | Cold, empty scope | 222–385 | the cache export took 72–89 s |
 | Warm, unchanged context, busy machine | 262 | `docker run` checks were slow from iowait |
 | Warm, unchanged context | **23** | root image 11 s, all stages `CACHED` |
-| Compile layer cached, fast machines (before #240) | 18–33 | n=6, median 21 |
+| Compile layer cached, fast machines (before narrowing the `COPY`) | 18–33 | n=6, median 21 |
 | Compile layer cached, slow-io machines | 107–252 | n=3, iowait 18–25 % |
 | Compile layer rebuilt, fast machines | 149–331 | n=4; two of them changed only `scripts/` |
-| Change outside `crates/`, after #240 | 21 | n=1, compile layer `CACHED` |
+| Change outside `crates/`, after narrowing the `COPY` | 21 | n=1, compile layer `CACHED` |
 
 - **Slow cached runs are slow machines, not misses.** On slow-io machines
   the time went into `docker run` and `sha256sum`, with the compile layer
@@ -238,16 +238,16 @@ From klav, `docker` task seconds:
   which costs **~70–90 s**. That happens once per scope, then the scope
   stays the same size.
 - **A compile-layer miss also pulls that base layer** from the Actions
-  cache (292 MB in #240's count): 18–22 s on 2026-11-07, but 84 s and 400 s
-  on 2026-11-09. A miss costs the compile plus this pull.
+  cache (292 MB in that count): 18–22 s on one day, but 84 s and 400 s
+  two days later. A miss costs the compile plus this pull.
 - **A stacked PR's first run reads main's BuildKit cache, not its parent
   PR's.** After a Dockerfile change in the base PR, the first run of the PR
-  above it compiles. klav #241, stacked on #240, compiled `klav-server` in
-  its first run (357 s), because main's cache still had the `COPY . .`
-  layout. Its next runs read its own cache: 19 s and 33 s.
-- Each scope takes Actions cache space (353 MB for klav's) toward the
+  above it compiles. A toolchain PR stacked on the narrowed-`COPY` PR
+  compiled `app-server` in its first run (357 s), because main's cache
+  still had the `COPY . .` layout. Its next runs read its own cache: 19 s and 33 s.
+- Each scope takes Actions cache space (353 MB in the first rollout) toward the
   **10 GB** limit. GitHub evicts the least recently used entries first.
-  - Entries are stored **per ref**. In klav, each PR that built the image
+  - Entries are stored **per ref**. There, each PR that built the image
     held its own ~353 MB copy of the same blobs (`buildkit-blob-1-sha256:…`
     under `refs/pull/<n>/merge`), next to main's.
   - Those copies expire after 7 days unused. Budget for the PRs open at

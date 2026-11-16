@@ -1,6 +1,6 @@
 ---
 name: ci-cache
-description: Onboard a repo onto Omar's ci-cache engine (a Cloudflare Worker on R2 serving the Turbo remote cache and an sccache WebDAV backend; a main/ tier written only by CI on main, per-branch tiers shared by Boat sandboxes and PR CI) and get the most out of it. It audits stacks and existing caches, wires Rust (sccache, the /home/user/<repo> bind mount, rust-cache order), Turbo and Docker (BuildKit type=gha) into GitHub Actions, wires Boat sandboxes (CI_CACHE_SANDBOX_KEY, ci-cache-env.sh), mints keys without printing them, checks cache-key parity, reads /v1/stats and measures the gain. Use it whenever the user mentions ci-cache or its setup action, sccache or RUSTC_WRAPPER, a remote compile cache, Turbo remote cache or TURBO_TOKEN, Swatinem/rust-cache, BuildKit or Docker layer caching in CI, cache hit rate or misses, a sandbox build CI did not reuse, reuseAlert, the 10 GB Actions cache limit, or making Boat CI faster with caching, even if they never say ci-cache.
+description: Onboard a repo onto a ci-cache engine (a Cloudflare Worker on R2 serving the Turbo remote cache and an sccache WebDAV backend; a main/ tier written only by CI on main, per-branch tiers shared by Boat sandboxes and PR CI) and get the most out of it. It audits stacks and existing caches, wires Rust (sccache, the /home/user/<repo> bind mount, rust-cache order), Turbo and Docker (BuildKit type=gha) into GitHub Actions, wires Boat sandboxes (CI_CACHE_SANDBOX_KEY, ci-cache-env.sh), mints keys without printing them, checks cache-key parity, reads /v1/stats and measures the gain. Use it whenever the user mentions ci-cache or its setup action, sccache or RUSTC_WRAPPER, a remote compile cache, Turbo remote cache or TURBO_TOKEN, Swatinem/rust-cache, BuildKit or Docker layer caching in CI, cache hit rate or misses, a sandbox build CI did not reuse, reuseAlert, the 10 GB Actions cache limit, or making Boat CI faster with caching, even if they never say ci-cache.
 ---
 
 # CI cache (ci-cache engine)
@@ -32,13 +32,17 @@ getting that parity and proving it with numbers.
 | `references/*.md` | Details; each step below says which one to read. |
 
 The scripts need bash, `jq` and `gh`; `mint-sandbox-key.sh` also needs `node`
-and the engine checkout (`~/dev/ci-cache`, or `CI_CACHE_REPO`).
+and the engine checkout (`CI_CACHE_REPO`, or the clone this skill lives in).
+Every script that calls the Worker reads its URL from `CI_CACHE_URL` and
+fails if it is unset; `audit-cache.sh` checks the owner against
+`CI_CACHE_ALLOWED_OWNERS` (or `--allowed-owners`).
 
 ## The engine in one screen
 
-- Worker: `https://ci-cache.omarespinosafernandez.workers.dev`. Repo
-  `OmarAlex24/ci-cache` (private) at `~/dev/ci-cache`. Its README (Spanish)
-  and `openapi.yaml` are the contract. API only: there is no dashboard.
+- Worker: your deployment, `https://ci-cache.<your-subdomain>.workers.dev`
+  (`CI_CACHE_URL`). Engine repo `OmarAlex24/ci-cache`, or your fork, checked
+  out at `CI_CACHE_REPO`. Its README and `openapi.yaml` are the contract.
+  API only: there is no dashboard.
 - R2 bucket `ci-cache-weur` (Europe, next to Boat's OVH machines). Metrics go
   to Workers Analytics Engine.
 - **Tiers.** The identity decides the tier. The client never chooses it.
@@ -78,9 +82,9 @@ Full detail, with inputs, outputs and every exported variable:
    `continue-on-error: true`. Every cached path has an uncached fallback: a
    Docker build retries without the cache, and sccache stays off if it
    can't start. A cache problem makes a run slower, never red.
-3. **Writes to shared infrastructure need Omar's OK.** That covers
-   `wrangler secret put`, `wrangler deploy` and `gh cache delete`. Print the
-   target, show the command, and wait for his answer.
+3. **Writes to shared infrastructure need the engine owner's OK.** That
+   covers `wrangler secret put`, `wrangler deploy` and `gh cache delete`.
+   Print the target, show the command, and wait for their answer.
 4. **Every push costs a Boat start.** In a stack of N PRs, a push to the base
    costs N. Push only the top branch. Put temporary measurement code in a
    commit that a later commit reverts, because force-push may be blocked.
@@ -107,11 +111,12 @@ Run `bash scripts/audit-cache.sh <repo-dir> <owner/repo>`. Note:
 - Vercel `TURBO_TOKEN`/`TURBO_TEAM`;
 - `docker build` calls;
 - the Actions cache size. Over ~8 GB, GitHub starts evicting what you are
-  about to add. Propose deleting stale prefixes, but only with Omar's OK.
+  about to add. Propose deleting stale prefixes, but only with the owner's OK.
 
 Also check two blockers:
 - **Owner.** The repo must belong to an owner in the Worker's
-  `ALLOWED_OWNERS` (`OmarAlex24`). An org repo needs an engine change first.
+  `ALLOWED_OWNERS` (a comma-separated list in `wrangler.jsonc`). Another
+  owner needs that list edited and the Worker redeployed first.
 - **Fork PRs.** They get no OIDC token, so they run uncached.
 
 → `references/engine.md`.
@@ -132,9 +137,9 @@ Put the action early, before rust-cache. Give the job
 ```yaml
       - id: cache
         continue-on-error: true            # a cache problem is a slow run, not a red one
-        uses: OmarAlex24/ci-cache/setup@c8972d60665c09e92455a710e406308f9e1bcbbd
+        uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: https://ci-cache.omarespinosafernandez.workers.dev
+          url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
           mount-workdir: "true"            # Rust: build at /home/user/<repo>, like the sandboxes
 ```
 
@@ -182,7 +187,8 @@ opens a session. Wire both ends:
    and read `/v1/stats/branches`.
 
 Connecting a repo to sandboxes in Boat's GitHub settings, so that
-`boat env add-repo` works, is Omar's step. → `references/sandbox.md`.
+`boat env add-repo` works, is the Boat account owner's step.
+→ `references/sandbox.md`.
 
 ### 5. Verify
 - Run `scripts/fingerprint-diff.sh` on a sandbox fingerprint and a CI run.

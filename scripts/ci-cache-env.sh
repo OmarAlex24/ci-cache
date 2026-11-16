@@ -2,7 +2,7 @@
 # Sets up the CI cache in a Boat sandbox: requests a session from the Worker with the
 # sandbox key and the current git branch, and writes the exports to ~/.ci-cache.env.
 #
-#   CI_CACHE_URL=https://ci-cache.<account>.workers.dev \
+#   CI_CACHE_URL=https://ci-cache.<your-subdomain>.workers.dev \
 #   CI_CACHE_SANDBOX_KEY=sk_... \
 #   bash ci-cache-env.sh [repo directory]      # defaults to the current one
 #   source ~/.ci-cache.env

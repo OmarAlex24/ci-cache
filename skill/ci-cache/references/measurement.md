@@ -1,8 +1,9 @@
 # Measuring a cache change
 
 A cache PR is a hypothesis: "this makes the job faster". Boat machines are
-noisy enough that one run proves nothing. This page is the protocol klav
-used, and the traps it found.
+noisy enough that one run proves nothing. This page is the protocol the
+first rollout used (a Rust workspace + browser extension + Docker monorepo),
+and the traps it found.
 
 ## Contents
 - What to measure
@@ -38,12 +39,12 @@ used, and the traps it found.
 
 Boat machines come in two classes that dominate the variance:
 
-| Class | iowait over the job | Effect seen in klav |
+| Class | iowait over the job | Effect seen in the first rollout |
 | --- | --- | --- |
 | fast | ~2 % | job ~333–434 s |
 | slow-io | 15–23 % | the same work at 536–702 s; clippy 306 s instead of ~190 s; `docker run` checks at 10–60 s each; a cached `docker` task at 107–252 s instead of 18–33 s (iowait 18–25 %) |
 
-Steal stayed below 1 % in klav's runs, but check it anyway. Over ~8 %, the
+Steal stayed below 1 % in those runs, but check it anyway. Over ~8 %, the
 run is noise.
 
 Classify **every** run before comparing:
@@ -84,9 +85,9 @@ A run shows what a change saves when it applies, not how often it applies.
 For a change to what invalidates a cache key (a narrower Docker context, a
 new `.dockerignore` entry), replay history before claiming a gain: over
 the default branch's last N commits, count how many changed the old inputs
-and how many change the new ones. klav #240 looked like 149–331 s down to
-21 s per change, but it removed 7 of 45 recompiles on main's last 80
-commits. `docker.md` has the sketch.
+and how many change the new ones. One narrowed Docker context looked like
+149–331 s down to 21 s per change, but it removed 7 of 45 recompiles on
+main's last 80 commits. `docker.md` has the sketch.
 
 ## Timing inside a task
 
@@ -124,8 +125,8 @@ To see where the time goes:
 - `cache-stats.sh O/R --range 24h`:
   - `hit-main` share (`from-main`): how much branches lean on main;
   - per branch, `reuse` = `ciHitsOnSandboxObjects / sandboxWrites`.
-    klav: **96 %** of what the sandbox compiled on `ci/cache-r2` was reused
-    by its PR's CI.
+    In the first rollout, **96 %** of what the sandbox compiled on a branch
+    was reused by that branch's PR CI.
   - `reuseAlert` is true at ≥ 20 sandbox writes with 0 reused. It is also
     true on a branch CI never read (a benchmark branch, a sandbox-only
     experiment), which the script shows as `no-ci`. Not an error there.
@@ -152,8 +153,8 @@ budget:
 Look for these while measuring. Each one is cheap:
 - **Overlap I/O with CPU inside a task.** Start downloads and installs
   (`apt`, a browser, a toolchain) in the background at the top of the task,
-  and wait for them right before they are needed. klav's `extension` task
-  went from ~636 s to 287 s at best.
+  and wait for them right before they are needed. The first rollout's
+  browser-extension task went from ~636 s to 287 s at best.
 - **`dpkg force-unsafe-io` on ephemeral runners.** dpkg fsyncs every file,
   and with other tasks' builds on the same disk, `install-deps` took
   53–232 s. With it, 18 s:
@@ -162,5 +163,5 @@ Look for these while measuring. Each one is cheap:
   echo force-unsafe-io | sudo tee /etc/dpkg/dpkg.cfg.d/ci-unsafe-io >/dev/null
   ```
 - **cargo-nextest** for test binaries that run one after another (`rust.md`).
-- **Don't restore what a remote cache already serves**: klav's `target/`
-  restore cost ~60 s in the foreground.
+- **Don't restore what a remote cache already serves**: a restored `target/`
+  cost ~60 s in the foreground.

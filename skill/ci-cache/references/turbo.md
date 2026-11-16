@@ -24,9 +24,9 @@ environment.
       - name: ci-cache
         id: cache
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/setup@c8972d60665c09e92455a710e406308f9e1bcbbd
+        uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: https://ci-cache.omarespinosafernandez.workers.dev
+          url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
           sccache: "false"          # a TS-only repo; omit to auto-detect Rust
       - name: ci-cache check
         continue-on-error: true
@@ -62,8 +62,8 @@ reasons:
 Also drop `TURBO_REMOTE_ONLY`, `--remote-only` and `--api`/`--token`/`--team`
 flags in scripts, and any `.turbo/config.json` committed with a team id.
 
-A local cache restored with `actions/cache` (`.turbo/cache`, as
-horizon-stack does with `TURBO_CACHE_DIR`) can stay as a first level, but
+A local cache restored with `actions/cache` (`.turbo/cache`, or a
+`TURBO_CACHE_DIR`) can stay as a first level, but
 it's redundant once the remote cache is warm. Measure before keeping it,
 since it costs Actions cache space.
 
@@ -116,13 +116,13 @@ With `mount-workdir: "true"`, the checkout appears at both
 its store into `node_modules`. A store that `setup-node`'s `cache: pnpm`
 restored on the other side of the mount fails with **EXDEV** (a cross-device
 link), and pnpm downloads every package again:
-- In klav: 298 packages, 1–5 s, so it doesn't matter there.
+- In the first rollout's repo: 298 packages, 1–5 s, so it didn't matter.
 - Installing from `$GITHUB_WORKSPACE` reuses the store. But a later
   `pnpm build` from `/home/user/<repo>` sees another store and installs
   everything again.
 
 Options, in order:
-1. Accept it when the install is short, as in klav.
+1. Accept it when the install is short, as it was there.
 2. Point the store inside the mount (`pnpm config set store-dir
    /home/user/<repo>/.pnpm-store`), and cache that path. Measure: the
    restore is a foreground step.

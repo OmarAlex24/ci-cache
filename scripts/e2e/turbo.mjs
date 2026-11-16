@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { check, mintSession, randomRepoId, ROOT, run, startWorker } from "./lib.mjs";
 
 const TURBO = join(ROOT, "node_modules", ".bin", "turbo");
-const REPO = "OmarAlex24/e2e-turbo";
+const REPO = "acme/e2e-turbo";
 
 function writeFixture(dir) {
   const files = {

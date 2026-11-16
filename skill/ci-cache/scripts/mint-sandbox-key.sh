@@ -7,7 +7,8 @@
 #
 # Env:
 #   CI_CACHE_KEYS_DIR  key directory (default ~/.config/ci-cache)
-#   CI_CACHE_REPO      engine checkout with scripts/new-key.mjs (default ~/dev/ci-cache)
+#   CI_CACHE_REPO      engine checkout with scripts/new-key.mjs (default: the clone this
+#                      skill lives in, when run from skill/ci-cache/ in that clone)
 #   CI_CACHE_REPO_ID   numeric GitHub repo id (skips `gh api repos/<repo>`)
 #
 # Prints only names, counts and the next commands. Uploading the map is a separate,
@@ -34,7 +35,11 @@ done
 [[ $repo == */* ]] || usage
 
 keys_dir=${CI_CACHE_KEYS_DIR:-$HOME/.config/ci-cache}
-engine=${CI_CACHE_REPO:-$HOME/dev/ci-cache}
+skill_root=$(cd "$(dirname "$0")/.." && pwd)
+# The engine checkout: CI_CACHE_REPO, or the clone this skill lives in (skill/ci-cache/).
+engine=${CI_CACHE_REPO:-}
+if [[ -z $engine && -f $skill_root/../../scripts/ci-cache-env.sh ]]; then engine=$(cd "$skill_root/../.." && pwd); fi
+[[ -n $engine ]] || { echo "set CI_CACHE_REPO to your ci-cache checkout (it holds scripts/new-key.mjs)" >&2; exit 1; }
 new_key=$engine/scripts/new-key.mjs
 [[ -f $new_key ]] || { echo "no $new_key (set CI_CACHE_REPO)" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
@@ -48,7 +53,7 @@ fi
 
 sha256() { if command -v sha256sum >/dev/null; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
 
-# klav -> CI_CACHE_SANDBOX_KEY_KLAV, horizon-stack -> ..._HORIZON_STACK (bash 3.2-safe).
+# my-repo -> CI_CACHE_SANDBOX_KEY_MY_REPO, app.web -> ..._APP_WEB (bash 3.2-safe).
 var=CI_CACHE_SANDBOX_KEY_$(printf '%s' "${repo#*/}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
 
 umask 077
@@ -102,7 +107,7 @@ if [[ -n $old_hash ]]; then echo "ci-cache: the old key's entry was removed from
 echo "ci-cache: $map_file now holds $count entries: $(jq -r '[.[] | .repo] | sort | join(", ")' "$map_file")"
 cat <<EOF
 
-Next (both write to shared infrastructure: confirm with Omar first):
+Next (both write to shared infrastructure: confirm with the Worker's owner first):
   1. Upload the FULL map (it replaces the secret):
        cd "$engine" && pnpm wrangler secret put SANDBOX_KEYS < "$map_file"
   2. Put the key in the repo's Boat environment, from stdin, output redacted:

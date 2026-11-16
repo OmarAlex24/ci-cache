@@ -13,7 +13,7 @@ import { createServer } from "node:net";
 
 import { check, mintSession, randomRepoId, run, startWorker } from "./lib.mjs";
 
-const REPO = "OmarAlex24/e2e-sccache";
+const REPO = "acme/e2e-sccache";
 
 function writeCrates(dir) {
   const files = {

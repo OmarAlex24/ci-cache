@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { check, ROOT, run, startWorker } from "./lib.mjs";
 
 const SCRIPT = join(ROOT, "scripts", "ci-cache-env.sh");
-const REPO = "OmarAlex24/e2e-sandbox";
+const REPO = "acme/e2e-sandbox";
 const REPO_ID = 555000111;
 
 const key = `sk_${randomBytes(24).toString("base64url")}`;

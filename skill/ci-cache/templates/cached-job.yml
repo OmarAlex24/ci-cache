@@ -8,7 +8,9 @@
 #
 # With boated-ci, the `run:` steps below become background tasks
 # (ci-task.ts start <task> <<'EOF' ... EOF); keep the `cd` line in each.
-# Pins are the ones klav uses; refresh them when you copy this.
+# Pins are the ones the first rollout used; refresh them when you copy this.
+# Set the repository variable CI_CACHE_URL to your Worker's URL, and replace
+# <sha> with a full commit SHA of the ci-cache repo (or your fork).
 
 name: CI
 
@@ -102,9 +104,9 @@ jobs:
       - name: ci-cache
         id: cache
         continue-on-error: true # a cache problem is a slow run, not a red one
-        uses: OmarAlex24/ci-cache/setup@c8972d60665c09e92455a710e406308f9e1bcbbd
+        uses: OmarAlex24/ci-cache/setup@<sha> # pin a full commit SHA
         with:
-          url: https://ci-cache.omarespinosafernandez.workers.dev
+          url: ${{ vars.CI_CACHE_URL }} # https://ci-cache.<your-subdomain>.workers.dev
           mount-workdir: "true"
 
       - name: Build directory

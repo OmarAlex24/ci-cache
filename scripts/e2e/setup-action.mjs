@@ -42,7 +42,7 @@ const work = mkdtempSync(join(tmpdir(), "ci-cache-setup-e2e-"));
 function session(tier, branch) {
   sessionReply = {
     status: 200,
-    body: { token: SESSION_TOKEN, expiresAt: "2026-11-07T00:00:00.000Z", repoId: 1, repo: "OmarAlex24/demo", tier, branch, kind: "ci" },
+    body: { token: SESSION_TOKEN, expiresAt: "2026-11-07T00:00:00.000Z", repoId: 1, repo: "acme/demo", tier, branch, kind: "ci" },
   };
 }
 
@@ -63,7 +63,7 @@ async function setupOnHost(name, inputs = {}, extraEnv = {}) {
     GITHUB_ENV: join(dir, "env"),
     GITHUB_OUTPUT: join(dir, "output"),
     GITHUB_PATH: join(dir, "path"),
-    GITHUB_REPOSITORY: "OmarAlex24/demo",
+    GITHUB_REPOSITORY: "acme/demo",
     GITHUB_WORKSPACE: join(dir, "workspace"),
     ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${port}/oidc?api-version=2.0`,
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: "req-token",
@@ -135,7 +135,7 @@ try {
       "mkdir -p /gh/workspace/crate2 /gh/workspace/a/b && echo '[workspace]' > /gh/workspace/Cargo.toml",
       "echo '[package]' > /gh/workspace/crate/Cargo.toml && echo '[package]' > /gh/workspace/crate2/Cargo.toml",
       "echo '[package]' > /gh/workspace/a/b/Cargo.toml && echo hello > /gh/workspace/marker.txt",
-      "export GITHUB_ENV=/gh/env GITHUB_OUTPUT=/gh/output GITHUB_PATH=/gh/path GITHUB_REPOSITORY=OmarAlex24/demo",
+      "export GITHUB_ENV=/gh/env GITHUB_OUTPUT=/gh/output GITHUB_PATH=/gh/path GITHUB_REPOSITORY=acme/demo",
       "export GITHUB_WORKSPACE=/gh/workspace RUNNER_TOOL_CACHE=/opt/hostedtoolcache",
       `export ACTIONS_ID_TOKEN_REQUEST_URL='http://host.docker.internal:${port}/oidc?api-version=2.0' ACTIONS_ID_TOKEN_REQUEST_TOKEN=req-token`,
       `export INPUT_URL=http://host.docker.internal:${port} INPUT_AUDIENCE=ci-cache INPUT_SCCACHE=auto INPUT_SCCACHE_VERSION=0.19.0 INPUT_MOUNT_WORKDIR=true`,

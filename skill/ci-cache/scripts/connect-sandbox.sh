@@ -21,9 +21,10 @@
 #                 run them with `bash`.
 #
 # Env:
-#   CI_CACHE_URL       Worker URL (default https://ci-cache.omarespinosafernandez.workers.dev)
+#   CI_CACHE_URL       your Worker's URL (required), e.g. https://ci-cache.<your-subdomain>.workers.dev
 #   CI_CACHE_KEYS_DIR  key directory with keys.env (default ~/.config/ci-cache)
-#   CI_CACHE_REPO      engine checkout with scripts/ci-cache-env.sh (default ~/dev/ci-cache)
+#   CI_CACHE_REPO      engine checkout with scripts/ci-cache-env.sh (default: the clone this
+#                      skill lives in, when run from skill/ci-cache/ in that clone)
 #   BOAT               boat binary (default: boat on PATH, else ~/.ascii/bin/boat)
 #
 # Secrets: `boat env list/info` print variable VALUES. This script only reads them as
@@ -35,7 +36,7 @@ set -euo pipefail
 set +x # never trace this script: it moves a plaintext key
 
 usage() {
-  sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 die() {
@@ -74,13 +75,18 @@ done
 dir=${dir%/}
 [[ -n $dir && $dir != /* && $dir != *..* ]] || die "--dir must be relative, without '..'"
 
-url=${CI_CACHE_URL:-https://ci-cache.omarespinosafernandez.workers.dev}
+url=${CI_CACHE_URL:-}
+[[ -n $url ]] || die "CI_CACHE_URL is not set: export your Worker's URL (https://ci-cache.<your-subdomain>.workers.dev)"
 url=${url%/}
 [[ $url == https://* ]] || die "CI_CACHE_URL must be https"
 keys_file=${CI_CACHE_KEYS_DIR:-$HOME/.config/ci-cache}/keys.env
-engine=${CI_CACHE_REPO:-$HOME/dev/ci-cache}
+skill_root=$(cd "$(dirname "$0")/.." && pwd)
+# The engine checkout: CI_CACHE_REPO, or the clone this skill lives in (skill/ci-cache/).
+engine=${CI_CACHE_REPO:-}
+if [[ -z $engine && -f $skill_root/../../scripts/ci-cache-env.sh ]]; then engine=$(cd "$skill_root/../.." && pwd); fi
+[[ -n $engine ]] || die "set CI_CACHE_REPO to your ci-cache checkout (it holds scripts/ci-cache-env.sh)"
 env_script=$engine/scripts/ci-cache-env.sh
-installer=$(cd "$(dirname "$0")/.." && pwd)/templates/sandbox-install-sccache.sh
+installer=$skill_root/templates/sandbox-install-sccache.sh
 
 boat=${BOAT:-}
 if [[ -z $boat ]]; then
@@ -101,7 +107,7 @@ for pin in VERSION SHA256_X86_64 SHA256_AARCH64; do
     die "SCCACHE_$pin in $installer differs from DEFAULT_SCCACHE_$pin in $engine/setup/setup.sh"
 done
 
-# klav -> CI_CACHE_SANDBOX_KEY_KLAV, horizon-stack -> ..._HORIZON_STACK (bash 3.2-safe).
+# my-repo -> CI_CACHE_SANDBOX_KEY_MY_REPO, app.web -> ..._APP_WEB (bash 3.2-safe).
 key_var=CI_CACHE_SANDBOX_KEY_$(printf '%s' "${repo#*/}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
 
 # The key must exist and look like a sandbox key. Checked in a subshell: nothing leaks
