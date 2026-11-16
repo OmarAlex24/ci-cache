@@ -54,7 +54,7 @@ runs against `wrangler dev` in `scripts/e2e/`.
 | Technology | Status | Notes |
 | --- | --- | --- |
 | Turbo (TS/JS monorepos) | Tested (e2e) | Remote Cache API v8 at `/v8/artifacts`; e2e with turbo 2.11.10 |
-| Rust via sccache | Tested (e2e) | sccache 0.19.0, WebDAV at `/dav/`; e2e with `cargo build` on a two-crate workspace. The action installs sccache by SHA-256 on Linux x86_64 and aarch64; the install path ran in Docker (ubuntu:24.04) on aarch64 here, x86_64 is pinned but was not exercised by this e2e |
+| Rust via sccache | Tested (e2e) | sccache 0.19.0, WebDAV at `/dav/`; e2e with `cargo build` on a two-crate workspace. The action installs sccache by SHA-256 on Linux x86_64 and aarch64 (both pinned); the e2e runs that install in Docker (ubuntu:24.04) on the host's architecture only |
 | C/C++ via sccache | Should work, untested | Nothing in `/dav/` is Rust-specific. But `sccache: auto` only detects a `Cargo.toml` and the action only exports `RUSTC_WRAPPER`: set `sccache: "true"` and your own launcher (`CMAKE_C_COMPILER_LAUNCHER=sccache`, `CC="sccache gcc"`, …) |
 | Docker / BuildKit layers | Not served by ci-cache | The skill recommends BuildKit `type=gha` (the Actions cache); ci-cache has no Docker credentials or registry API |
 | Nx, Bazel, Gradle | Not served by ci-cache | Not supported: their remote cache protocols are not implemented ([adding support](#adding-support-for-your-stack)) |

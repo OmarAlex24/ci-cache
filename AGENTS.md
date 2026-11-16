@@ -52,8 +52,11 @@ account unless the owner asks for it: they write to production.
 - **Tokens and keys are never logged**: not session tokens, `sk_`, `rk_`, OIDC tokens nor
   `SESSION_SECRET`. Not in Worker errors, scripts, tests' output, PRs or commits. Errors are
   generic JSON.
-- **A cache problem never turns a client's job red**: the action and `ci-cache-env.sh`
-  degrade to an uncached build.
+- **Fail loudly, degrade at the caller.** `setup.sh` and `ci-cache-env.sh` exit non-zero
+  with a clear message when they can't get a session (no OIDC permission, 401, Worker down);
+  keep it that way. Only an sccache server that won't start degrades inside the action (a
+  warning, no `RUSTC_WRAPPER`). Workflows put `continue-on-error: true` on the action step,
+  so a cache problem makes a run slower, never red.
 
 ## Connecting a repo to ci-cache
 
