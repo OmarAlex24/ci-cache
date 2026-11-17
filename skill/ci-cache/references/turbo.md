@@ -26,7 +26,7 @@ environment.
         continue-on-error: true
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
+          url: ${{ secrets.CI_CACHE_URL }}      # a secret, not a variable: GitHub masks it in logs
           sccache: "false"          # a TS-only repo; omit to auto-detect Rust
       - name: ci-cache check
         continue-on-error: true

@@ -26,7 +26,16 @@ json_field() {
 
 url=${INPUT_URL%/}
 audience=${INPUT_AUDIENCE:-ci-cache}
-[[ $url =~ ^https?://[^[:space:]]+$ ]] || fail "invalid input url: '$url'"
+# Mask the Worker's URL and host before anything can print them (curl's errors name the
+# host alone). GitHub already masks it when it comes from secrets.CI_CACHE_URL; this also
+# covers a URL passed as a variable or literally, and the bare host.
+host=${url#*://}
+host=${host%%/*}
+host=${host%%:*}
+for value in "$url" "$host"; do
+  if [[ -n $value && $value != *[[:space:]]* ]]; then echo "::add-mask::$value"; fi
+done
+[[ $url =~ ^https?://[^[:space:]]+$ ]] || fail "invalid input url (empty? a Dependabot run without the CI_CACHE_URL secret?)"
 [[ -n ${GITHUB_ENV:-} && -n ${GITHUB_OUTPUT:-} && -n ${GITHUB_REPOSITORY:-} ]] || fail "this must run inside GitHub Actions"
 if [[ -z ${ACTIONS_ID_TOKEN_REQUEST_URL:-} || -z ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-} ]]; then
   fail "no OIDC token: add 'permissions: id-token: write' to the job"

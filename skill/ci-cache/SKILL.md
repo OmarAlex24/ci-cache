@@ -139,7 +139,7 @@ Put the action early, before rust-cache. Give the job
         continue-on-error: true            # a cache problem is a slow run, not a red one
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
+          url: ${{ secrets.CI_CACHE_URL }}      # a secret, not a variable: GitHub masks it in logs
           # mount-workdir: auto (default) builds Rust at /home/user/<repo>, like the sandboxes
 ```
 
