@@ -134,6 +134,10 @@ try {
   r = await setupOnHost("auto-no-rust", { INPUT_SCCACHE: "auto" });
   check(r.code === 0 && !read(r.dir, "env").includes("RUSTC_WRAPPER"), "without Cargo.toml it doesn't set up sccache");
 
+  console.log("4b. workdir-path validation");
+  r = await setupOnHost("bad-workdir-path", { INPUT_WORKDIR_PATH: "relative/path" });
+  check(r.code === 0 && r.out.includes("::warning title=ci-cache::workdir-path must be an absolute path") && r.out.includes("using /home/user/demo"), "a relative workdir-path warns and falls back to /home/user/<repo>");
+
   console.log("5. mount-workdir=auto (default)");
   r = await setupOnHost("mount-auto-no-rust", { INPUT_MOUNT_WORKDIR: undefined });
   check(r.code === 0 && r.out.includes("mount-workdir auto: no Cargo.toml") && read(r.dir, "output").includes(`workdir=${join(r.dir, "workspace")}`), "the default is auto: without Cargo.toml it builds in GITHUB_WORKSPACE with a log line");
@@ -181,6 +185,8 @@ try {
       `mkdir -p /home/user/full && touch /home/user/full/x && : > /gh/output; GITHUB_REPOSITORY=acme/full INPUT_MOUNT_WORKDIR=auto INPUT_SCCACHE=false bash /setup/setup.sh; echo "== full rc=$?"; cat /gh/output; echo "== end full"`,
       `mkdir -p /nosudo && printf '#!/bin/sh\\nexit 1\\n' > /nosudo/sudo && chmod +x /nosudo/sudo && : > /gh/output; PATH=/nosudo:$PATH GITHUB_REPOSITORY=acme/nosudo INPUT_MOUNT_WORKDIR=auto INPUT_SCCACHE=false bash /setup/setup.sh; echo "== nosudo rc=$?"; cat /gh/output; echo "== end nosudo"`,
       `PATH=/nosudo:$PATH GITHUB_REPOSITORY=acme/strict INPUT_MOUNT_WORKDIR=true INPUT_SCCACHE=false bash /setup/setup.sh && echo "STRICT DID NOT FAIL" || echo "== strict failed as expected"`,
+      // workdir-path: another provider's clone path.
+      `: > /gh/output; GITHUB_REPOSITORY=acme/custom INPUT_MOUNT_WORKDIR=auto INPUT_WORKDIR_PATH=/workspace/custom/ INPUT_SCCACHE=false bash /setup/setup.sh; echo "== custom"; cat /gh/output; cat /workspace/custom/marker.txt; echo "== end custom"`,
       'echo "== bad sha"; : > /gh/env; rm -rf /opt/hostedtoolcache; INPUT_SCCACHE_SHA256=$(printf "0%.0s" $(seq 64)) bash /setup/setup.sh && echo "DID NOT FAIL" || echo "failed as expected"',
     ].join("\n");
     const res = await run("docker", [
@@ -205,6 +211,7 @@ try {
     check(out.includes("mount-workdir auto: /home/user/full exists and is not empty") && section("full").startsWith(" rc=0") && section("full").includes("workdir=/gh/workspace"), "auto with a non-empty target skips the mount, exit 0, workdir = GITHUB_WORKSPACE");
     check(out.includes("mount-workdir auto: no passwordless sudo") && section("nosudo").startsWith(" rc=0") && section("nosudo").includes("workdir=/gh/workspace"), "auto without passwordless sudo skips the mount, exit 0");
     check(out.includes("== strict failed as expected") && !out.includes("STRICT DID NOT FAIL"), "mount-workdir=true still fails loudly when it can't mount");
+    check(section("custom").includes("workdir=/workspace/custom\n") && section("custom").includes("hello"), "workdir-path mounts the checkout at another provider's path (trailing / dropped)");
   }
   check(seen.includes("GET /oidc") && seen.includes("POST /v1/session"), "the script talked to the expected endpoints");
   console.log("e2e setup/action: OK");
