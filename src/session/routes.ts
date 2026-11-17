@@ -4,6 +4,7 @@ import type { JWTVerifyGetKey } from "jose";
 import { readConfig, readSessionSecret } from "../config.ts";
 import { badRequest, unauthorized } from "../errors.ts";
 import { readBearer, readSmallJson } from "../http.ts";
+import { countingFailures, rejectCredential } from "../ratelimit.ts";
 import type { AppEnv } from "../types.ts";
 import { findSandboxKey } from "./keys.ts";
 import { verifyGithubOidc } from "./oidc.ts";
@@ -28,7 +29,7 @@ export function sessionRoutes(deps: { jwks: JWTVerifyGetKey }) {
 
   app.post("/v1/session", async (c) => {
     const credential = readBearer(c);
-    if (!credential) throw unauthorized();
+    if (!credential) return rejectCredential(c, unauthorized());
     const config = readConfig(c.env);
     const secret = readSessionSecret(c.env);
     const now = Math.floor(Date.now() / 1000);
@@ -38,11 +39,13 @@ export function sessionRoutes(deps: { jwks: JWTVerifyGetKey }) {
     if (credential.startsWith(SANDBOX_KEY_PREFIX)) {
       const branch = readBranch(await readSmallJson(c, 4096));
       const entry = await findSandboxKey(c.env.SANDBOX_KEYS, credential);
-      if (!entry) throw unauthorized();
+      if (!entry) return rejectCredential(c, unauthorized());
       // A sandbox key always gets the branch tier (`rama`), even if the branch is named main.
       claims = { v: 1, repoId: entry.repoId, repo: entry.repo, tier: "rama", branch, kind: "sandbox", exp };
     } else {
-      const identity = await verifyGithubOidc(credential, config, deps.jwks);
+      // A 401 (bad token) or 403 (owner not allowed) counts against the client IP's limit.
+      // verifyGithubOidc rejects malformed or mis-addressed JWTs before fetching the JWKS.
+      const identity = await countingFailures(c, () => verifyGithubOidc(credential, config, deps.jwks));
       claims = { v: 1, ...identity, kind: "ci", exp };
     }
 

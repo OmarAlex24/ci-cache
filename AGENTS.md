@@ -13,6 +13,7 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `src/app.ts` | Hono app: mounts every route module, error handler |
 | `src/session/` | `POST /v1/session`: OIDC verification, `sk_` keys, the tier policy (`policy.ts`), HMAC session tokens, `requireSession` |
 | `src/turbo/`, `src/dav/` | the two cache protocols |
+| `src/ratelimit.ts` | per-IP rate limit on requests without a valid credential (`BAD_CREDENTIAL_LIMITER`); valid credentials never reach it |
 | `src/storage/tiers.ts` | tier → R2 read/write prefixes (`main/…`, `ramas/…`) |
 | `src/metrics/record.ts` | one Analytics Engine data point per cache request |
 | `src/stats/` | `/v1/stats`, `/v1/stats/branches`, `/v1/stats/repos` (AE SQL API) |

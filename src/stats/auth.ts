@@ -2,6 +2,7 @@ import { createMiddleware } from "hono/factory";
 
 import { unauthorized } from "../errors.ts";
 import { readBearer } from "../http.ts";
+import { rejectCredential } from "../ratelimit.ts";
 import { findKey, parseHashMap } from "../session/keys.ts";
 import type { AppEnv } from "../types.ts";
 
@@ -31,9 +32,10 @@ function statsEntries(source: string | undefined): [string, StatsKeyEntry][] {
 /** Requires a key from STATS_KEYS. Session tokens and sandbox keys don't work here. */
 export const requireStatsKey = createMiddleware<AppEnv>(async (c, next) => {
   const key = readBearer(c);
-  if (!key) throw unauthorized();
+  if (!key) return rejectCredential(c, unauthorized());
   const entry = await findKey(statsEntries(c.env.STATS_KEYS), key);
-  if (!entry) throw unauthorized();
+  // Before any Analytics Engine query: a bad key only costs a sha256 and the limiter.
+  if (!entry) return rejectCredential(c, unauthorized());
   c.set("statsKey", entry);
   await next();
 });
