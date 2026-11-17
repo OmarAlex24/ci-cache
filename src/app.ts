@@ -5,6 +5,7 @@ import type { JWTVerifyGetKey } from "jose";
 import { davRoutes } from "./dav/routes.ts";
 import type { Env } from "./env.ts";
 import { HttpError, jsonError } from "./errors.ts";
+import { limiterFromEnv, limiterMiddleware, type LimiterFactory } from "./ratelimit.ts";
 import { sessionRoutes } from "./session/routes.ts";
 import { analyticsFromEnv, type AnalyticsClient } from "./stats/analytics.ts";
 import { statsRoutes } from "./stats/routes.ts";
@@ -15,6 +16,8 @@ export interface AppDeps {
   jwks: JWTVerifyGetKey;
   /** Analytics Engine SQL API client (injectable for tests). */
   analytics?: (env: Env) => AnalyticsClient;
+  /** Limiter for requests without a valid credential (injectable for tests). */
+  rateLimiter?: LimiterFactory;
 }
 
 export function createApp(deps: AppDeps) {
@@ -24,6 +27,8 @@ export function createApp(deps: AppDeps) {
   // (each R2 read) and `total` (until the Worker returns the response; the R2 body keeps
   // streaming afterwards, so `total` is the Worker's first byte).
   app.use(timing({ totalDescription: "" }));
+  // Only consulted after a credential was rejected: valid tokens never reach the limiter.
+  app.use(limiterMiddleware(deps.rateLimiter ?? limiterFromEnv));
 
   app.get("/health", (c) => c.json({ status: "ok" }));
   app.route("/", sessionRoutes(deps));

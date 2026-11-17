@@ -234,6 +234,7 @@ R2 body keeps streaming afterwards). `curl -w '%{time_starttransfer}
 | --- | --- | --- |
 | `CACHE` | R2 (`ci-cache-weur`) | the cache; the Worker has no R2 keys |
 | `METRICS` | Analytics Engine (dataset `ci_cache`) | one data point per request |
+| `BAD_CREDENTIAL_LIMITER` | Rate Limiting (`ratelimits`, 30 per 60 s) | limits requests without a valid credential, per client IP ([Rate limit](#rate-limit-on-bad-credentials)) |
 
 ### Vars (`wrangler.jsonc`)
 
@@ -247,6 +248,34 @@ R2 body keeps streaming afterwards). `curl -w '%{time_starttransfer}
 | `MAX_ARTIFACT_BYTES` | `104857600` (100 MB) | per-object cap on PUT |
 | `METRICS_DATASET` | `ci_cache` | AE dataset; must match the `METRICS` binding |
 | `REUSE_ALERT_MIN_WRITES` | `20` | `reuseAlert` threshold |
+| `RATE_LIMIT_BAD_CREDENTIALS` | `true` | `false` turns off the rate limit on bad credentials without removing the binding |
+
+### Rate limit on bad credentials
+
+Requests that arrive **without a valid credential** count against a per-IP limit
+(`cf-connecting-ip`): a missing or bad Bearer on `/v8/*` and `/dav/*`, a failed
+`POST /v1/session` (401, or 403 for an owner outside `ALLOWED_OWNERS`), and a bad `rk_` key
+on `/v1/stats*`. Past the limit, those failures answer `429 {"code":"rate_limited"}` with
+`Retry-After: 60` instead of 401/403.
+
+- **Valid credentials never touch the limiter.** It is only consulted after a credential
+  has been rejected, so CI runners that share an IP with a misbehaving client keep working.
+- **The number lives in the binding**, not in `vars`: `ratelimits[].simple` in
+  [`wrangler.jsonc`](wrangler.jsonc) (`limit` failures per `period`, which must be 10 or
+  60 s; default 30 per 60 s). Cloudflare counts per location, so it is approximate.
+  `namespace_id` is any positive integer unique in your account (Workers sharing it share
+  counters). `RATE_LIMIT_BAD_CREDENTIALS=false` turns it off.
+- **Before the expensive work.** A bad `rk_` key costs a sha256 and is rejected before
+  any Analytics Engine query. An OIDC token that is malformed, not RS256, from another
+  issuer, for another audience or expired is rejected before the JWKS lookup. A
+  well-formed forgery still costs one signature check (and counts as a failure).
+- It fails open: no `cf-connecting-ip` (only local tools; Cloudflare always sets it) or a
+  limiter error never blocks a request.
+
+What it does **not** do: every request, limited or not, is still a Worker invocation that
+you pay for. It stops brute force and expensive work (JWKS, SQL), not a flood. Real
+volumetric protection is a WAF rate-limiting rule on a custom domain in front of the
+Worker, plus not publishing the URL.
 
 ### Secrets (`wrangler secret put`)
 
@@ -284,7 +313,7 @@ pnpm wrangler secret put CF_ACCOUNT_ID
 pnpm wrangler secret put CF_API_TOKEN
 
 # 3. Set ALLOWED_OWNERS (it ships as a placeholder) and check CACHE_AUDIENCE in
-#    wrangler.jsonc, then deploy
+#    wrangler.jsonc (and the rate limit's namespace_id: unique in your account), then deploy
 pnpm check
 pnpm run deploy
 ```
@@ -458,6 +487,8 @@ pnpm lint:sh                        # shellcheck of the client scripts
 
 - Every endpoint except `/health` requires a token; the three kinds (session, `sk_`, `rk_`)
   are not accepted outside their place.
+- Requests without a valid credential are rate limited per IP; valid ones never are
+  ([Rate limit](#rate-limit-on-bad-credentials)).
 - Keys are stored as sha256 and compared in constant time against every entry; the session
   token's signature is verified with `crypto.subtle.verify`.
 - Tokens are never logged; errors are generic JSON with no internal details.

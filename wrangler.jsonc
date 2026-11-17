@@ -12,6 +12,14 @@
   "r2_buckets": [{ "binding": "CACHE", "bucket_name": "ci-cache-weur" }],
   // Must match METRICS_DATASET (the /v1/stats queries use that name).
   "analytics_engine_datasets": [{ "binding": "METRICS", "dataset": "ci_cache" }],
+  // Rate limit for requests WITHOUT a valid credential (bad or missing Bearer, a failed
+  // POST /v1/session, a bad rk_ key), per client IP and per Cloudflare location. Valid
+  // tokens never count. `limit` is the number of failures per `period` (10 or 60 s).
+  // `namespace_id` is any positive integer, unique in your account: Workers that share it
+  // share counters. RATE_LIMIT_BAD_CREDENTIALS=false turns it off without removing it.
+  "ratelimits": [
+    { "name": "BAD_CREDENTIAL_LIMITER", "namespace_id": "4201", "simple": { "limit": 30, "period": 60 } }
+  ],
   "vars": {
     // Audience that GitHub Actions OIDC tokens must carry.
     "CACHE_AUDIENCE": "ci-cache",
@@ -27,6 +35,8 @@
     "MAX_ARTIFACT_BYTES": "104857600",
     "METRICS_DATASET": "ci_cache",
     // /v1/stats/branches flags reuseAlert if the sandbox wrote at least this many and CI hit none.
-    "REUSE_ALERT_MIN_WRITES": "20"
+    "REUSE_ALERT_MIN_WRITES": "20",
+    // "false" turns off the rate limit on failed credentials (the number is in `ratelimits`).
+    "RATE_LIMIT_BAD_CREDENTIALS": "true"
   }
 }

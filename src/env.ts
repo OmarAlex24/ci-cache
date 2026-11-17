@@ -4,6 +4,8 @@ export interface Env {
   CACHE: R2Bucket;
   /** Workers Analytics Engine: one data point per cache request. */
   METRICS?: AnalyticsEngineDataset;
+  /** Workers Rate Limiting: counts requests without a valid credential, per client IP. */
+  BAD_CREDENTIAL_LIMITER?: RateLimit;
 
   /** Secret: HMAC key for session tokens (≥ 32 characters). */
   SESSION_SECRET: string;
@@ -26,6 +28,8 @@ export interface Env {
   METRICS_DATASET?: string;
   /** Sandbox writes on a branch from which an alert is raised if CI reused none of them. */
   REUSE_ALERT_MIN_WRITES?: string;
+  /** "false" turns off the rate limit on failed credentials (the binding sets the number). */
+  RATE_LIMIT_BAD_CREDENTIALS?: string;
 }
 
 declare global {
