@@ -32,6 +32,7 @@ case "$1 \${2:-} \${3:-}" in
     shift; while [ $# -gt 0 ]; do case $1 in --config) cp "$2" "$s/deployed.json"; shift 2 ;; --name) n=$2; shift 2 ;; *) shift ;; esac; done
     echo "Uploaded $n"; echo "Deployed $n triggers"; echo "  https://$n.example-account.workers.dev" ;;
   "secret list "*)
+    [ -z "\${FAKE_SECRET_LIST_FAIL:-}" ] || { echo "fake wrangler: API error" >&2; exit 1; }
     printf '['; sep=""; for f in "$s"/secrets/*; do [ -e "$f" ] || continue; printf '%s{"name": "%s", "type": "secret_text"}' "$sep" "$(basename "$f")"; sep=","; done; echo ']' ;;
   "secret put "*) cat >"$s/secrets/$3"; echo "Success! Uploaded secret $3" ;;
   *) echo "fake wrangler: unexpected call: $*" >&2; exit 9 ;;
@@ -137,6 +138,16 @@ try {
   check(!r.calls.some((c) => c.startsWith("secret put")), "puts no secret again");
   check(r.secret("SESSION_SECRET") === sessionSecret && r.out.includes("SESSION_SECRET already set"), "keeps SESSION_SECRET");
   check(r.calls.some((c) => c.startsWith("deploy")), "deploys again (picks up code changes)");
+
+  console.log("3b. a failed secret list stops before any secret is set");
+  const keysBefore = ["SESSION_SECRET", "SANDBOX_KEYS", "STATS_KEYS"].map((k) => r.secret(k));
+  r = await bootstrap(args, { account: "main", env: { FAKE_SECRET_LIST_FAIL: "1" } });
+  check(r.code !== 0 && r.out.includes("could not list the secrets of ci-cache-test01"), `exits non-zero and says why (code ${r.code})`);
+  check(!r.calls.some((c) => c.startsWith("secret put")), "puts no secret");
+  check(
+    ["SESSION_SECRET", "SANDBOX_KEYS", "STATS_KEYS"].every((k, i) => r.secret(k) === keysBefore[i] && keysBefore[i] !== undefined),
+    "SESSION_SECRET, SANDBOX_KEYS and STATS_KEYS are unchanged",
+  );
 
   console.log("4. --with-stats");
   const account = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4";

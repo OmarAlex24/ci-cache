@@ -358,7 +358,8 @@ instance):
 3. sets `SESSION_SECRET` (`openssl rand -base64 48`, piped to `wrangler secret put`, never
    printed; kept if it already exists, since a new one would invalidate every session) and
    `SANDBOX_KEYS`/`STATS_KEYS` = `{}` if missing; with `--with-stats`, `CF_ACCOUNT_ID` and
-   `CF_API_TOKEN` from the environment;
+   `CF_API_TOKEN` from the environment. If `wrangler secret list` fails, it stops before
+   setting any of them, so a rerun never replaces an existing secret;
 4. prints the Worker URL and the next steps.
 
 `--name` defaults to `ci-cache-<6 random hex>` so the URL isn't guessable; the script prints

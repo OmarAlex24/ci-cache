@@ -168,9 +168,13 @@ else
   deployed=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' "$tmp/deploy.log" | head -1 || true)
 fi
 
-# 4. Secrets, only the missing ones. `secret list` prints names only.
+# 4. Secrets, only the missing ones. `secret list` prints names only. If it fails, stop:
+# taking every secret as missing would replace SESSION_SECRET and empty the key maps.
 existing=""
-$dry_run || existing=$("${wrangler[@]}" secret list --name "$name" --format json 2>/dev/null || true)
+if ! $dry_run; then
+  existing=$("${wrangler[@]}" secret list --name "$name" --format json 2>/dev/null) && [[ $existing =~ ^[[:space:]]*\[ ]] ||
+    fail "could not list the secrets of $name, so none was set (none is overwritten). Check 'wrangler secret list --name $name' and rerun"
+fi
 has_secret() { grep -qE "\"name\": *\"$1\"" <<<"$existing"; }
 
 if has_secret SESSION_SECRET; then
