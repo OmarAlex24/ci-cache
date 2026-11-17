@@ -66,6 +66,10 @@ case $location in "" | weur | eeur | wnam | enam | apac | oc) ;; *) fail "--loca
 if $with_stats; then
   [[ -n ${CF_ACCOUNT_ID:-} && -n ${CF_API_TOKEN:-} ]] || fail "--with-stats reads CF_ACCOUNT_ID and CF_API_TOKEN from the environment: set both"
 fi
+# wrangler treats CF_API_TOKEN/CF_ACCOUNT_ID as its own (deprecated) login: keep the values
+# for the secrets but take them out of wrangler's environment, so it uses your login.
+stats_account_id=${CF_ACCOUNT_ID:-} stats_api_token=${CF_API_TOKEN:-}
+unset CF_ACCOUNT_ID CF_API_TOKEN
 command -v node >/dev/null 2>&1 || fail "node is required"
 
 if [[ -n ${WRANGLER:-} ]]; then
@@ -191,8 +195,8 @@ for secret in SANDBOX_KEYS STATS_KEYS; do
   fi
 done
 if $with_stats; then
-  printf '%s' "$CF_ACCOUNT_ID" | secret_step "CF_ACCOUNT_ID from the environment" CF_ACCOUNT_ID
-  printf '%s' "$CF_API_TOKEN" | secret_step "CF_API_TOKEN from the environment" CF_API_TOKEN
+  printf '%s' "$stats_account_id" | secret_step "CF_ACCOUNT_ID from the environment" CF_ACCOUNT_ID
+  printf '%s' "$stats_api_token" | secret_step "CF_API_TOKEN from the environment" CF_API_TOKEN
 fi
 
 [[ -n $deployed ]] || deployed="(see wrangler's output above)"

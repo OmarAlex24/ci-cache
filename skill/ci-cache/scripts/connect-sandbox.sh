@@ -22,7 +22,7 @@
 #                 run them with `bash`.
 #
 # Env:
-#   CI_CACHE_URL       your Worker's URL (required), e.g. https://ci-cache.<your-subdomain>.workers.dev
+#   CI_CACHE_URL       your Worker's URL (else read from $CI_CACHE_KEYS_DIR/url), e.g. https://ci-cache.<your-subdomain>.workers.dev
 #   CI_CACHE_KEYS_DIR  key directory with keys.env (default ~/.config/ci-cache)
 #   CI_CACHE_REPO      engine checkout with scripts/ci-cache-env.sh (default: the clone this
 #                      skill lives in, when run from skill/ci-cache/ in that clone)
@@ -76,8 +76,9 @@ done
 dir=${dir%/}
 [[ -n $dir && $dir != /* && $dir != *..* ]] || die "--dir must be relative, without '..'"
 
-url=${CI_CACHE_URL:-}
-[[ -n $url ]] || die "CI_CACHE_URL is not set: export your Worker's URL (https://ci-cache.<your-subdomain>.workers.dev)"
+# CI_CACHE_URL, else the url file next to keys.env (one line, the Worker's URL).
+url=${CI_CACHE_URL:-$(cat "${CI_CACHE_KEYS_DIR:-$HOME/.config/ci-cache}/url" 2>/dev/null || true)}
+[[ -n $url ]] || die "CI_CACHE_URL is not set: export your Worker's URL or put it in ~/.config/ci-cache/url (https://ci-cache.<your-subdomain>.workers.dev)"
 url=${url%/}
 [[ $url == https://* ]] || die "CI_CACHE_URL must be https"
 keys_file=${CI_CACHE_KEYS_DIR:-$HOME/.config/ci-cache}/keys.env
