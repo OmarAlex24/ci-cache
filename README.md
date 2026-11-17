@@ -315,7 +315,7 @@ GitHub) does.
 | OIDC with `head_ref` (pull_request, pull_request_target) | `rama` (branch) = `head_ref` | its branch, then `main/` | its branch |
 | OIDC, another event on a main ref (schedule, workflow_dispatch...) | `main-ro` | `main/` | nothing (403) |
 | OIDC on any other ref (push to a branch, tags) | `rama` (branch) = the ref name | its branch, then `main/` | its branch |
-| Sandbox key `sk_...` | **always** `rama` (branch), even if the branch is named `main` | its branch, then `main/` | its branch |
+| Sandbox key `sk_...` | **always** `rama` (branch), even if the branch is named `main`; only on its `branches` patterns, if the key has them | its branch, then `main/` | its branch |
 
 Rules are evaluated in that order: `head_ref` is checked before "main ref" because
 `pull_request_target` carries `ref = refs/heads/main` (the base branch) and must land in the
@@ -327,6 +327,15 @@ sandbox produces a bad artifact — through a bug, a different environment or on
 stays in `ramas/<repoId>/<branchKey>/` and at most that same branch's CI reuses it. It never
 reaches `main/`, so neither `main` nor any other branch ever reuses it. A stolen sandbox key
 can only write to branches, which expire in 7 days.
+
+**Binding a key to branches.** By default a sandbox key can open a session for any branch of
+its repo, so a sandbox could write into another PR's tier. Give its `SANDBOX_KEYS` entry
+`"branches": ["agent/*", "fix/**"]` and the Worker answers 403 for any other branch: `*`
+matches within one path segment (not `/`), `**` across them, everything else is literal. The
+field is optional (absent = any branch); present, it holds 1 to 32 patterns, and a malformed
+one makes `/v1/session` answer the generic 500 `misconfigured` for every key, like any other
+malformed entry. The 403 is not a bad credential, so it never counts against the per-IP rate
+limit. `mint-sandbox-key.sh --branches 'agent/*'` and `new-key.mjs --branches` write it.
 
 ## Endpoints
 
@@ -507,12 +516,13 @@ Worker an unguessable name (`bootstrap.sh` does both).
 | Secret | What it is |
 | --- | --- |
 | `SESSION_SECRET` | HMAC key for session tokens, ≥ 32 random characters |
-| `SANDBOX_KEYS` | JSON `{"<sha256 of the key>": {"repoId": 123, "repo": "owner/repo", "label": "..."}}` |
+| `SANDBOX_KEYS` | JSON `{"<sha256 of the key>": {"repoId": 123, "repo": "owner/repo", "label": "...", "branches": ["agent/*"]}}` (`branches` optional: [binding a key to branches](#tiers-and-why-they-prevent-poisoning)) |
 | `STATS_KEYS` | JSON `{"<sha256 of the key>": {"label": "...", "repoIds": [123]}}` (optional `repoIds` limits the repos) |
 | `CF_ACCOUNT_ID` | Cloudflare account, for the Analytics Engine SQL API |
 | `CF_API_TOKEN` | API token with the *Account Analytics: Read* permission |
 
-Keys are generated with `node scripts/new-key.mjs sandbox <repoId> <owner/repo> [label]` or
+Keys are generated with `node scripts/new-key.mjs sandbox <repoId> <owner/repo> [label]
+[--branches <pattern,...>]` or
 `node scripts/new-key.mjs stats <label> [repoId,...]`: it prints the key (only that once) and
 the entry with its hash to merge into the secret. A repo can have several sandbox keys, one
 per label (provider or machine pool); `skill/ci-cache/scripts/mint-sandbox-key.sh` keeps the
@@ -909,7 +919,10 @@ pnpm lint:sh                        # shellcheck of the client scripts
 - Every endpoint except `/health` requires a token; the three kinds (session, `sk_`, `rk_`)
   are not accepted outside their place.
 - Requests without a valid credential are rate limited per IP; valid ones never are
-  ([Rate limit](#rate-limit-on-bad-credentials)).
+  ([Rate limit](#rate-limit-on-bad-credentials)). A valid sandbox key on a branch outside
+  its `branches` patterns gets a 403 that is not counted either.
+- A sandbox key can be bound to branch patterns, so a leaked key or a confused agent can't
+  write into other PRs' tiers ([Tiers](#tiers-and-why-they-prevent-poisoning)).
 - Keys are stored as sha256 and compared in constant time against every entry; the session
   token's signature is verified with `crypto.subtle.verify`.
 - Tokens are never logged; errors are generic JSON with no internal details.

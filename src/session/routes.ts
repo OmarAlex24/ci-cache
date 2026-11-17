@@ -2,11 +2,11 @@ import { Hono } from "hono";
 import type { JWTVerifyGetKey } from "jose";
 
 import { readConfig, readSessionSecret } from "../config.ts";
-import { badRequest, unauthorized } from "../errors.ts";
+import { badRequest, forbidden, unauthorized } from "../errors.ts";
 import { readBearer, readSmallJson } from "../http.ts";
 import { countingFailures, rejectCredential } from "../ratelimit.ts";
 import type { AppEnv } from "../types.ts";
-import { findSandboxKey } from "./keys.ts";
+import { branchAllowed, findSandboxKey } from "./keys.ts";
 import { verifyGithubOidc } from "./oidc.ts";
 import { signSession, type SessionClaims } from "./token.ts";
 
@@ -40,6 +40,9 @@ export function sessionRoutes(deps: { jwks: JWTVerifyGetKey }) {
       const branch = readBranch(await readSmallJson(c, 4096));
       const entry = await findSandboxKey(c.env.SANDBOX_KEYS, credential);
       if (!entry) return rejectCredential(c, unauthorized());
+      // A valid key on a branch outside its patterns: a plain 403, not counted against the
+      // IP's bad-credential limit (the key is valid; CI runners and sandboxes share IPs).
+      if (!branchAllowed(entry, branch)) throw forbidden();
       // A sandbox key always gets the branch tier (`rama`), even if the branch is named main.
       claims = { v: 1, repoId: entry.repoId, repo: entry.repo, tier: "rama", branch, kind: "sandbox", exp };
     } else {

@@ -83,9 +83,28 @@ try {
   r = await mint("no spaces allowed");
   check(r.code === 2 && r.out.includes("label:"), "a label with spaces is refused");
 
+  console.log("6b. --branches binds the key to branch patterns");
+  r = await mint("agents", "--branches", "agent/*,fix/**");
+  check(r.code === 0 && r.out.includes("bound to the branches agent/*,fix/**"), `exits 0 and says so${r.code ? `: ${r.out}` : ""}`);
+  const bound = keys()[`${VAR}__AGENTS`];
+  check(JSON.stringify(map()[sha(bound)]?.branches) === JSON.stringify(["agent/*", "fix/**"]), "the map entry has branches: [agent/*, fix/**]");
+  r = await mint("agents", "--rotate");
+  const reBound = keys()[`${VAR}__AGENTS`];
+  check(
+    r.code === 0 && reBound !== bound && !map()[sha(bound)] && JSON.stringify(map()[sha(reBound)]?.branches) === JSON.stringify(["agent/*", "fix/**"]),
+    "--rotate without --branches keeps the replaced key's patterns",
+  );
+  check(r.out.includes("kept from the replaced key"), "and says so");
+  r = await mint("agents", "--rotate", "--branches", "bot/*");
+  const reBound2 = keys()[`${VAR}__AGENTS`];
+  check(r.code === 0 && JSON.stringify(map()[sha(reBound2)]?.branches) === JSON.stringify(["bot/*"]), "--rotate --branches replaces them");
+  const entries = Object.keys(map()).length;
+  r = await mint("pool2", "--branches", "has space");
+  check(r.code === 2 && Object.keys(map()).length === entries && !(`${VAR}__POOL2` in keys()), "a bad pattern is refused and changes nothing");
+
   console.log("7. never prints a key");
   const all = printed.join("\n");
-  const stored = [first, second, rotated, legacy, ...Object.values(keys())];
+  const stored = [first, second, rotated, legacy, bound, reBound, reBound2, ...Object.values(keys())];
   check(stored.every((key) => !all.includes(key)), "no key appears in any output");
   check(!/sk_[A-Za-z0-9_-]{20,}/.test(all), "nor anything shaped like one");
 

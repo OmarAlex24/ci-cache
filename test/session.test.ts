@@ -9,7 +9,7 @@ import { requireSession } from "../src/session/middleware.ts";
 import { resolveTier } from "../src/session/policy.ts";
 import { verifySession } from "../src/session/token.ts";
 import type { AppEnv } from "../src/types.ts";
-import { TEST_REPO_ID, TEST_SANDBOX_KEY } from "./bindings.ts";
+import { TEST_BOUND_KEY, TEST_BOUND_KEY_HASH, TEST_REPO_ID, TEST_SANDBOX_KEY } from "./bindings.ts";
 import { githubClaims, oidcFixture, postSession, sessionToken, signOidc } from "./helpers.ts";
 
 let app: ReturnType<typeof createApp>;
@@ -184,6 +184,48 @@ describe("POST /v1/session with a sandbox key", () => {
   it("rejects large bodies", async () => {
     const res = await postSession(app, `Bearer ${TEST_SANDBOX_KEY}`, { branch: "x", pad: "y".repeat(5000) });
     expect(res.status).toBe(413);
+  });
+});
+
+describe("POST /v1/session with a sandbox key bound to branch patterns", () => {
+  it("opens a session for a branch that matches a pattern, always on the rama tier", async () => {
+    for (const branch of ["agent/fix-login", "release/2026/11", "release/x", "fix-a.v2"]) {
+      const res = await postSession(app, `Bearer ${TEST_BOUND_KEY}`, { branch });
+      expect(res.status, branch).toBe(200);
+      expect(await res.json(), branch).toMatchObject({ tier: "rama", branch, kind: "sandbox", repoId: TEST_REPO_ID });
+    }
+  });
+
+  it("answers a generic 403 for a branch outside the patterns: `*` stops at `/`, the rest is literal", async () => {
+    for (const branch of ["main", "agent", "agent/a/b", "agentx/y", "release", "fix-a/b.v2", "fix-aXv2", "x/agent/y"]) {
+      const res = await postSession(app, `Bearer ${TEST_BOUND_KEY}`, { branch });
+      expect(res.status, branch).toBe(403);
+      expect(await res.json()).toEqual({ code: "forbidden", message: "Operation not allowed for this token" });
+    }
+  });
+
+  it("a key without the field still opens a session for any branch", async () => {
+    for (const branch of ["main", "agent/x", "anything/else"]) {
+      expect((await postSession(app, `Bearer ${TEST_SANDBOX_KEY}`, { branch })).status, branch).toBe(200);
+    }
+  });
+
+  it("a malformed field is a generic 500 misconfigured, for every key", async () => {
+    const entry = { repoId: TEST_REPO_ID, repo: "acme/widgets", label: "agents" };
+    for (const branches of [[], "agent/*", [""], ["has space"], ["a?b"], ["x".repeat(256)], [3], Array(33).fill("a/*"), null]) {
+      const keys = JSON.stringify({ [TEST_BOUND_KEY_HASH]: { ...entry, branches } });
+      const res = await app.request(
+        "/v1/session",
+        {
+          method: "POST",
+          headers: { authorization: `Bearer ${TEST_BOUND_KEY}`, "content-type": "application/json" },
+          body: JSON.stringify({ branch: "agent/x" }),
+        },
+        { ...env, SANDBOX_KEYS: keys },
+      );
+      expect(res.status, JSON.stringify(branches)).toBe(500);
+      expect(await res.json()).toEqual({ code: "misconfigured", message: "The service is not configured" });
+    }
   });
 });
 

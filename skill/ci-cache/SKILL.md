@@ -141,7 +141,8 @@ Also check two blockers:
 ### 2. Keys
 A repo needs a sandbox key only if agents build it in sandboxes. Mint one
 per provider (or machine pool) with
-`scripts/mint-sandbox-key.sh <owner/repo> [label]`. The script stores the
+`scripts/mint-sandbox-key.sh <owner/repo> [label]`; `--branches 'agent/*'`
+binds it to the branches the agents use (any other gets a 403). The script stores the
 plaintext in `~/.config/ci-cache/keys.env` (mode 600) and merges the hash
 into `sandbox_keys.json`. It prints only names and the next commands.
 
@@ -346,7 +347,6 @@ template. → `references/sandbox.md`.
   input differed); today the action compares per run.
 - Go through `GOCACHEPROG`.
 - Temporary Docker credentials.
-- Sandbox tokens bound to one branch.
 
 Turbo already replays task outputs, test logs included, across the same
 tiers. → `references/roadmap.md`.
