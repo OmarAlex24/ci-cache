@@ -9,6 +9,7 @@
 set -u
 v() { command -v "$1" >/dev/null 2>&1 && "$@" 2>&1 | head -1 || echo "(not installed)"; }
 
+fingerprint() {
 echo "== machine"
 echo "user:         $(id -un) uid=$(id -u)"
 echo "HOME:         $HOME"
@@ -47,4 +48,12 @@ echo "docker:       $(v docker version --format '{{.Server.Version}}')"
 echo "buildx:       $(v docker buildx version)"
 
 echo "== variables that go into the keys"
-env | grep -E '^(CARGO_|RUST|SCCACHE_|TURBO_|GO|CC=|CXX=|CFLAGS|LDFLAGS|NODE_OPTIONS)' | grep -viE 'token|key|secret' | sort
+# Never secrets: drops every line whose name or value mentions a token, key, secret,
+# password, credential or auth; sk_/rk_ values and user:password@ in URLs are redacted below.
+# ci-cache-env.sh uploads this output to the Worker (PUT /v1/fingerprint).
+env | grep -E '^(CARGO_|RUST|SCCACHE_|TURBO_|GO|CC=|CXX=|CFLAGS|LDFLAGS|NODE_OPTIONS)' |
+  grep -viE 'token|key|secret|passw|credential|auth' | sort
+}
+
+# Every line (RUSTFLAGS and GOFLAGS are printed above too) goes through the redaction.
+fingerprint | sed -E 's#://[^/@[:space:]]+@#://<redacted>@#g; s/(sk|rk)_[A-Za-z0-9_-]+/<redacted>/g' 

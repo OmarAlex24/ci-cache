@@ -154,6 +154,7 @@ Full detail in [`openapi.yaml`](openapi.yaml).
 | `POST /v8/artifacts` | session | batch lookup |
 | `POST /v8/artifacts/events` | session | turbo events (validated and dropped) |
 | `GET`/`PUT`/`PROPFIND /dav/...` | session | WebDAV for sccache |
+| `PUT`/`GET /v1/fingerprint` | session | stores the session's cache fingerprint / returns the one to compare against ([Fingerprints](#sandbox-vs-ci-fingerprints)) |
 | `GET /v1/stats?repo=&range=` | `rk_...` | hits, misses, bytes, time saved, by tier, kind and protocol |
 | `GET /v1/stats/branches?repo=&range=` | `rk_...` | reuse per branch and `reuseAlert` |
 | `GET /v1/stats/repos?range=` | `rk_...` | the repos with traffic: name, totals, `lastSeenAt` and how many branches have `reuseAlert` |
@@ -182,7 +183,42 @@ the endpoint ends in `/`, sccache sends `/dav//...`; the Worker tolerates it.
 
 For sccache to hit between sandbox and CI, the checkout path, the toolchain and the flags
 must match (see `scripts/cache-fingerprint.sh`), and `CARGO_INCREMENTAL=0` (sccache doesn't
-cache incremental compilations).
+cache incremental compilations). The action checks this on its own:
+[Sandbox vs CI fingerprints](#sandbox-vs-ci-fingerprints).
+
+## Sandbox vs CI fingerprints
+
+If a sandbox and its branch's CI compile with different keys (another `RUSTFLAGS`,
+toolchain, checkout path, user, `CARGO_HOME`…), CI misses everything the sandbox built.
+ci-cache compares them automatically:
+
+1. `ci-cache-env.sh`, after getting its session, runs `cache-fingerprint.sh` in the
+   checkout with the exports loaded and uploads the output (`PUT /v1/fingerprint`). If that
+   fails it prints a warning and goes on; `CI_CACHE_FINGERPRINT=false` skips it.
+2. The setup action, after the session (and after `mount-workdir`, so with the real
+   path), generates CI's fingerprint, uploads it (not on `main-ro`) and, on the branch tier,
+   downloads the sandbox's for the same branch (`GET /v1/fingerprint`) and compares them
+   with `scripts/fingerprint-diff.sh`.
+3. Each line that enters the cache keys (class `KEY`) and differs becomes
+   `::warning title=ci-cache cache key mismatch::RUSTFLAGS: sandbox=-D warnings ci=(missing)`
+   plus a table in the job summary, one per item (unset and empty count as equal). Lines
+   that don't change keys (vCPU, RAM, kernel) are never warnings; tool versions that may
+   change another cache (node, turbo) go in a collapsed block of the summary, and so do the
+   `KEY` lines when the job has no `RUSTC_WRAPPER` (sccache is off, so they can't cost a
+   hit). No sandbox fingerprint for the branch: one log line, nothing else.
+
+The step never fails the job, and its result is the action output `fingerprint-compare`
+(`match`, `mismatch`, `none`, `skipped` or `error`). `fingerprint-compare: "false"` turns it
+off. Fingerprints never carry secrets: `cache-fingerprint.sh` drops every variable whose
+name or value mentions a token, key, secret, password, credential or auth, redacts `sk_`/`rk_`
+values and `user:password@` in URLs, and `ci-cache-env.sh` refuses to upload one containing
+its key or token. The sandbox's values only reach CI's log escaped. Fingerprints live under
+the session's tier prefix (`ramas/<repoId>/<branchKey>/fingerprint/<kind>`,
+`main/<repoId>/fingerprint/ci`), so the two lifecycle rules expire them, and they are not
+counted in the metrics.
+
+The comparison sees the job's environment when the action runs: a variable set only on a
+later step (`env:` of the build step) is not in it. Put key variables in the job's `env:`.
 
 ## Metrics
 
@@ -387,7 +423,10 @@ audience `audience` (default `ci-cache`), calls `POST /v1/session`, masks the to
   `workdir` output says where to build.
 - Outputs: `tier`, `branch`, `expires-at`, `workdir`.
 - Then it prints the cache fingerprint (`scripts/cache-fingerprint.sh`; `fingerprint: "false"`
-  to skip it): compare it with the sandbox's to see why it misses.
+  to skip it) and compares it with the sandbox's for the same branch, warning about every
+  line that makes the cache miss (`fingerprint-compare: "false"` to skip it;
+  [details](#sandbox-vs-ci-fingerprints)).
+- Outputs also include `fingerprint-compare` (`match`, `mismatch`, `none`, `skipped`, `error`).
 
 ### Boat sandbox: `scripts/ci-cache-env.sh`
 
@@ -403,7 +442,10 @@ source ~/.ci-cache.env
 It writes `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM`, `SCCACHE_WEBDAV_ENDPOINT`,
 `SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true`, `CARGO_INCREMENTAL=0` and,
 if sccache is installed, `RUSTC_WRAPPER=sccache` to `~/.ci-cache.env` (mode 600); it
-restarts the sccache server so it picks up the new token. A sandbox key always gets the
+restarts the sccache server so it picks up the new token. Then it uploads the checkout's
+cache fingerprint (it needs `cache-fingerprint.sh` next to it, or
+`CI_CACHE_FINGERPRINT_SCRIPT`) so the branch's CI can compare it; a failed upload is only
+a warning. A sandbox key always gets the
 branch tier (`rama`). The token lasts 6 h: run the script again if the agent's session lasts
 longer.
 
@@ -479,7 +521,9 @@ pnpm lint:sh                        # shellcheck of the client scripts
   (passed to `wrangler dev` with `--var SANDBOX_KEYS`). `pnpm e2e:setup` tests
   `setup/setup.sh` with a server that fakes GitHub's OIDC and `/v1/session` (the real OIDC
   only exists inside Actions) and, if Docker is available, runs the SHA-256-checked sccache
-  install and the `mount --bind` on Ubuntu.
+  install and the `mount --bind` on Ubuntu. `pnpm e2e:fingerprint` uploads a sandbox
+  fingerprint with `ci-cache-env.sh` and runs the action's comparison step against it
+  (different `RUSTFLAGS` → one warning; same values → none).
 - Analytics Engine can't be queried locally: the query sits behind the `AnalyticsClient`
   interface and the tests check the generated SQL and the shape of the responses.
 

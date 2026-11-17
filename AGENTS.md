@@ -14,11 +14,12 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `src/session/` | `POST /v1/session`: OIDC verification, `sk_` keys, the tier policy (`policy.ts`), HMAC session tokens, `requireSession` |
 | `src/turbo/`, `src/dav/` | the two cache protocols |
 | `src/ratelimit.ts` | per-IP rate limit on requests without a valid credential (`BAD_CREDENTIAL_LIMITER`); valid credentials never reach it |
-| `src/storage/tiers.ts` | tier → R2 read/write prefixes (`main/…`, `ramas/…`) |
+| `src/storage/tiers.ts` | tier → R2 read/write prefixes (`main/…`, `ramas/…`), including where fingerprints live |
+| `src/fingerprint/` | `PUT`/`GET /v1/fingerprint`: sandbox and CI cache fingerprints, compared by the action |
 | `src/metrics/record.ts` | one Analytics Engine data point per cache request |
 | `src/stats/` | `/v1/stats`, `/v1/stats/branches`, `/v1/stats/repos` (AE SQL API) |
-| `setup/` | the composite GitHub Action (`action.yml` + `setup.sh`) |
-| `scripts/` | `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `new-key.mjs`, `mint-session.mjs`, `e2e/` |
+| `setup/` | the composite GitHub Action (`action.yml` + `setup.sh` + `fingerprint-compare.sh`) |
+| `scripts/` | `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` (the skill keeps an identical copy), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
 | `test/` | vitest in the Workers runtime (`@cloudflare/vitest-pool-workers`) |
 | `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine |
 | `openapi.yaml` | the API contract; keep it in sync with `src/` |
@@ -52,7 +53,8 @@ account unless the owner asks for it: they write to production.
   breaks existing clients.
 - **Tokens and keys are never logged**: not session tokens, `sk_`, `rk_`, OIDC tokens nor
   `SESSION_SECRET`. Not in Worker errors, scripts, tests' output, PRs or commits. Errors are
-  generic JSON.
+  generic JSON. Cache fingerprints are uploaded, so `cache-fingerprint.sh` must keep
+  filtering secrets out.
 - **Fail loudly, degrade at the caller.** `setup.sh` and `ci-cache-env.sh` exit non-zero
   with a clear message when they can't get a session (no OIDC permission, 401, Worker down);
   keep it that way. Only an sccache server that won't start degrades inside the action (a
@@ -113,10 +115,11 @@ bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env   # again after every
 - turbo prints `cache hit, replaying logs` per task;
 - `GET /v1/stats/branches?repo=<repoId>` with an `rk_` key: `ciHitsOnSandboxObjects` close
   to `sandboxWrites` and `reuseAlert: false` after a sandbox build on the PR's branch;
-- on a miss, run `bash scripts/cache-fingerprint.sh > sandbox.txt` in the sandbox and diff
-  it against the CI run: `gh run view <id> --log > ci.log` then
-  `bash skill/ci-cache/scripts/fingerprint-diff.sh sandbox.txt ci.log` (every `KEY` line is
-  a reason to miss).
+- on a branch, the action compares CI's cache fingerprint with the one the sandbox uploaded:
+  every `ci-cache cache key mismatch` warning (and row in the job summary) is a reason to
+  miss. By hand: `bash scripts/cache-fingerprint.sh > sandbox.txt` in the sandbox,
+  `gh run view <id> --log > ci.log`, then `bash scripts/fingerprint-diff.sh sandbox.txt ci.log`
+  (every `KEY` line is a reason to miss).
 
 The [`skill/ci-cache`](skill/ci-cache) skill does all of this step by step (audit, keys,
 Rust/Turbo/Docker wiring, Boat environments, measurement). Its scripts read `CI_CACHE_URL`,

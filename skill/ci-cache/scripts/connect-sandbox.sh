@@ -3,8 +3,9 @@
 # Connects a repo's Boat sandboxes to the ci-cache engine:
 #   1. finds the Boat environment that holds the repo (or takes it as an argument);
 #   2. sets CI_CACHE_URL and CI_CACHE_SANDBOX_KEY in it (values from stdin, never argv);
-#   3. delivers two Boat secret files into ~/.ci-cache/ in the sandbox: the engine's
-#      scripts/ci-cache-env.sh and this skill's templates/sandbox-install-sccache.sh
+#   3. delivers three Boat secret files into ~/.ci-cache/ in the sandbox: the engine's
+#      scripts/ci-cache-env.sh and scripts/cache-fingerprint.sh (ci-cache-env.sh uploads
+#      its output for CI to compare) and this skill's templates/sandbox-install-sccache.sh
 #      (the Boat image has cargo but no sccache);
 #   4. runs `boat env upgrade` so live sandboxes get the new version.
 #
@@ -191,6 +192,7 @@ echo "Boat env:    $env_name ($found_by)"
 echo "Worker:      $url"
 echo "key:         CI_CACHE_SANDBOX_KEY from $key_var in $keys_file"
 echo "files:       $env_script ($engine_rev) -> /home/user/$dir/ci-cache-env.sh"
+echo "             $engine/scripts/cache-fingerprint.sh -> /home/user/$dir/cache-fingerprint.sh"
 echo "             $installer -> /home/user/$dir/install-sccache.sh"
 $dry_run && echo "mode:        dry run, nothing changes"
 echo
@@ -244,7 +246,10 @@ if ! $dry_run; then
     die "set-var CI_CACHE_SANDBOX_KEY failed"
 fi
 
-for pair in "ci-cache-env.sh:$env_script" "install-sccache.sh:$installer"; do
+# cache-fingerprint.sh goes next to ci-cache-env.sh, which uploads its output after each
+# session so the branch's CI compares fingerprints on its own.
+for pair in "ci-cache-env.sh:$env_script" "cache-fingerprint.sh:$engine/scripts/cache-fingerprint.sh" \
+  "install-sccache.sh:$installer"; do
   target=$dir/${pair%%:*} source=${pair#*:}
   step "set-file $target (from $source)" -- env set-file "$env_name" "$target" --from "$source"
   if ! $dry_run; then
