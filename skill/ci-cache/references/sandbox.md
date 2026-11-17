@@ -64,8 +64,8 @@ Measured with Boat CLI 1.0.92 on a `default` sandbox:
 ```bash
 export CI_CACHE_URL=https://ci-cache.<your-subdomain>.workers.dev
 export CI_CACHE_REPO=/path/to/ci-cache   # not needed when the skill runs from that clone
-bash ~/.claude/skills/ci-cache/scripts/connect-sandbox.sh <owner>/<repo> [env] --dry-run
-bash ~/.claude/skills/ci-cache/scripts/connect-sandbox.sh <owner>/<repo> [env]
+bash <skill-dir>/scripts/connect-sandbox.sh <owner>/<repo> [env] --dry-run
+bash <skill-dir>/scripts/connect-sandbox.sh <owner>/<repo> [env]
 ```
 
 It does, in order:
@@ -103,7 +103,7 @@ repo:        acme/widgets
 Boat env:    widgets (argument)
 key:         CI_CACHE_SANDBOX_KEY from CI_CACHE_SANDBOX_KEY_WIDGETS in ~/.config/ci-cache/keys.env
 files:       /path/to/ci-cache/scripts/ci-cache-env.sh (1a2b3c4) -> /home/user/.ci-cache/ci-cache-env.sh
-             ~/.claude/skills/ci-cache/templates/sandbox-install-sccache.sh -> /home/user/.ci-cache/install-sccache.sh
+             <skill-dir>/templates/sandbox-install-sccache.sh -> /home/user/.ci-cache/install-sccache.sh
 
 state before:
   version: 8

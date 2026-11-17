@@ -1,16 +1,21 @@
 ---
 name: ci-cache
-description: Onboard a repo onto a ci-cache engine (a Cloudflare Worker on R2 serving the Turbo remote cache and an sccache WebDAV backend; a main/ tier written only by CI on main, per-branch tiers shared by Boat sandboxes and PR CI) and get the most out of it. It audits stacks and existing caches, wires Rust (sccache, the /home/user/<repo> bind mount, rust-cache order), Turbo and Docker (BuildKit type=gha) into GitHub Actions, wires Boat sandboxes (CI_CACHE_SANDBOX_KEY, ci-cache-env.sh), mints keys without printing them, checks cache-key parity (automatic sandbox vs CI fingerprint warnings), adds the job summary report action, deploys a new instance with bootstrap.sh, reads /v1/stats and measures the gain. Use it whenever the user mentions ci-cache or its setup action, sccache or RUSTC_WRAPPER, a remote compile cache, Turbo remote cache or TURBO_TOKEN, Swatinem/rust-cache, BuildKit or Docker layer caching in CI, cache hit rate or misses, a sandbox build CI did not reuse, a "cache key mismatch" warning, reuseAlert, deploying their own ci-cache, the 10 GB Actions cache limit, or making Boat CI faster with caching, even if they never say ci-cache.
+description: Onboard a repo onto a ci-cache engine (a Cloudflare Worker on R2 serving a Turbo remote cache and an sccache WebDAV backend; a main/ tier written only by CI on main, per-branch tiers shared by PR CI and agents' sandboxes from any provider) and get the most out of it. It audits stacks and caches, wires Rust (sccache, the build-path bind mount, rust-cache order), Turbo and Docker (BuildKit type=gha) into GitHub Actions, connects sandboxes (pinned installer, keys minted without printing them, a Boat recipe), checks sandbox vs CI cache-key parity, adds the job summary report, deploys an instance with bootstrap.sh, reads /v1/stats and measures the gain. Use it when the user mentions ci-cache, sccache or RUSTC_WRAPPER, a remote compile cache, Turbo remote cache or TURBO_TOKEN, Swatinem/rust-cache, Docker layer caching in CI, cache hit rate or misses, a sandbox build CI did not reuse, a cache key mismatch, reuseAlert, the 10 GB Actions cache limit, or making CI faster with caching, even if they never say ci-cache.
 ---
 
 # CI cache (ci-cache engine)
 
-**ci-cache** is a remote build cache that a Boat sandbox and GitHub Actions
-share. An agent compiles in its sandbox, the PR's CI reuses those objects,
-and every branch falls back to what `main` built. It caches *inside* jobs.
-The `boated-ci` skill is its complement: it cuts the number of jobs
-(machine starts). Use boated-ci to consolidate the jobs, then this skill to
-make the one heavy job fast.
+**ci-cache** is a remote build cache for GitHub Actions that agents'
+sandboxes can share. CI on a branch reuses what `main` built; an agent that
+compiles in its sandbox (Boat, a container, a VM: any provider) warms its
+PR's CI too. It caches *inside* jobs. On per-start runners such as Boat, the
+`boated-ci` skill is its complement: it cuts the number of jobs (machine
+starts). Use boated-ci to consolidate the jobs, then this skill to make the
+one heavy job fast.
+
+Paths below (`scripts/`, `templates/`, `references/`) are relative to this
+skill's directory, wherever it is installed (as a plugin or under
+`~/.claude/skills/`).
 
 A cache only pays when the two sides produce **byte-identical cache keys**:
 same path, toolchain, flags and environment. Most of this skill is about
@@ -21,18 +26,20 @@ getting that parity and proving it with numbers.
 | Path | Use it for |
 | --- | --- |
 | `scripts/audit-cache.sh` | Stack detection, cache steps in the workflows, Actions cache usage vs the 10 GB limit. Run first. |
-| `scripts/mint-sandbox-key.sh` | Mint a sandbox key and merge it into the local key files without printing it. |
-| `scripts/connect-sandbox.sh` | Wire a repo's Boat environment: both variables from stdin, `ci-cache-env.sh`, `cache-fingerprint.sh` and the sccache installer as secret files, `boat env upgrade`. Names only, `--dry-run`. |
+| `scripts/mint-sandbox-key.sh` | Mint a sandbox key (one per repo and label: a provider or machine pool) and merge it into the local key files without printing it. |
+| `scripts/connect-sandbox.sh` | Boat only: wire a repo's Boat environment (both variables from stdin, `ci-cache-env.sh`, `cache-fingerprint.sh` and the sccache installer as secret files, `boat env upgrade`). Names only, `--dry-run`. Other providers use the engine's `scripts/install-sandbox.sh`. |
 | `scripts/fingerprint-diff.sh` | Diff two cache fingerprints by hand; flags the lines that break keys. The setup action already does this on every branch-tier job. |
 | `scripts/cache-stats.sh` | Read `/v1/stats` and `/v1/stats/branches` (sandbox→CI reuse per branch). |
 | `scripts/job-durations.sh` | First-attempt job durations from the jobs API, with the median; `--compare <date or commit>` prints a before/after markdown table. Identical copy of the engine's. |
 | `scripts/machine-class.sh` | iowait and steal of a run from boated-ci's machine samples: classifies the run as `fast` or `slow-io`. |
 | `templates/cached-job.yml` | One job wired for Rust + Turbo + Docker (actionlint-clean). Start from it. |
-| `templates/sandbox-install-sccache.sh` | Installs CI's sccache (0.19.0, SHA-256 checked) in a sandbox; `connect-sandbox.sh` delivers it. |
+| `templates/sandbox-install-sccache.sh` | Installs CI's sccache (0.19.0, SHA-256 checked) in a sandbox; `connect-sandbox.sh` delivers it, and the engine's `install-sandbox.sh --rust` fetches and runs it. |
 | `references/*.md` | Details; each step below says which one to read. |
 
 The scripts need bash, `jq` and `gh`; `mint-sandbox-key.sh` also needs `node`
-and the engine checkout (`CI_CACHE_REPO`, or the clone this skill lives in).
+and the engine checkout (`CI_CACHE_REPO`, or the clone this skill lives in;
+installed as a plugin, the skill is a copy outside the clone, so set
+`CI_CACHE_REPO`). Only `connect-sandbox.sh` needs the `boat` CLI.
 Every script that calls the Worker reads its URL from `CI_CACHE_URL` and
 fails if it is unset; `audit-cache.sh` checks the owner against
 `CI_CACHE_ALLOWED_OWNERS` (or `--allowed-owners`).
@@ -68,7 +75,8 @@ fails if it is unset; `audit-cache.sh` checks the owner against
 - **CI side:** the `OmarAlex24/ci-cache/setup@<sha>` action (session,
   `mount-workdir: auto`, sccache, fingerprint comparison) and
   `OmarAlex24/ci-cache/report@<sha>` (job summary). Sandbox side:
-  `scripts/ci-cache-env.sh` (session, then fingerprint upload).
+  `scripts/ci-cache-env.sh` (session, then fingerprint upload; sourcing
+  `~/.ci-cache.env` renews it), installed by `scripts/install-sandbox.sh`.
 
 Full detail, with inputs, outputs and every exported variable:
 `references/engine.md`.
@@ -77,13 +85,14 @@ Full detail, with inputs, outputs and every exported variable:
 
 1. **Never print a secret.** Sandbox keys (`sk_`), stats keys (`rk_`) and
    session tokens never go to a terminal, a log, a PR or this skill.
-   - `boat env info`, `boat env list` and the answer of `boat env new`
-     print variable values. A key leaked twice this way and had to be
-     rotated. Read them only as `--json` piped into a `jq` filter that
-     emits names, then `sed`-redact `sk_`/`rk_`. `connect-sandbox.sh` does
-     this for you.
-   - Set variables with `boat env set-var <env> NAME`, reading the value
-     from stdin.
+   - Put a key into a provider's secret store from stdin, never as an
+     argument, and filter the answer: many provider CLIs echo values back.
+   - In Boat, `boat env info`, `boat env list` and the answer of
+     `boat env new` print variable values. A key leaked twice this way and
+     had to be rotated. Read them only as `--json` piped into a `jq` filter
+     that emits names, then `sed`-redact `sk_`/`rk_`, and set variables with
+     `boat env set-var <env> NAME` from stdin. `connect-sandbox.sh` does this
+     for you.
    - In traces, test a secret with `${VAR:+set}`, never with its value.
 2. **A cache never turns a job red.** Every cache step gets
    `continue-on-error: true`. Every cached path has an uncached fallback: a
@@ -93,8 +102,8 @@ Full detail, with inputs, outputs and every exported variable:
    covers `scripts/bootstrap.sh` (without `--dry-run`), `wrangler secret
    put`, `wrangler deploy` and `gh cache delete`.
    Print the target, show the command, and wait for their answer.
-4. **Every push costs a Boat start.** In a stack of N PRs, a push to the base
-   costs N. Push only the top branch. Put temporary measurement code in a
+4. **On per-start runners (Boat), every push costs a machine start.** In a
+   stack of N PRs, a push to the base costs N. Push only the top branch. Put temporary measurement code in a
    commit that a later commit reverts, because force-push may be blocked.
 
 ## What caches what
@@ -130,8 +139,9 @@ Also check two blockers:
 → `references/engine.md`.
 
 ### 2. Keys
-A repo needs a sandbox key only if agents build it in Boat sandboxes. Mint
-it with `scripts/mint-sandbox-key.sh <owner/repo>`. The script stores the
+A repo needs a sandbox key only if agents build it in sandboxes. Mint one
+per provider (or machine pool) with
+`scripts/mint-sandbox-key.sh <owner/repo> [label]`. The script stores the
 plaintext in `~/.config/ci-cache/keys.env` (mode 600) and merges the hash
 into `sandbox_keys.json`. It prints only names and the next commands.
 
@@ -149,6 +159,7 @@ Put the action early, before rust-cache. Give the job
         with:
           url: ${{ secrets.CI_CACHE_URL }}      # a secret, not a variable: GitHub masks it in logs
           # mount-workdir: auto (default) builds Rust at /home/user/<repo>, like the sandboxes
+          # workdir-path: <path>   # if your sandboxes clone the repo somewhere else
 ```
 
 End the job with the report step, so every run shows its own numbers:
@@ -182,30 +193,42 @@ Then follow the guide for each stack:
 `templates/cached-job.yml` puts all three together.
 
 ### 4. Sandbox wiring
-Boat has no startup hook, so a sandbox writes to the cache only if its agent
-opens a session. Wire both ends:
-1. **The environment.** Run `scripts/connect-sandbox.sh <owner/repo> [env]`,
-   first with `--dry-run`. It sets `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY`
-   (from stdin), delivers `~/.ci-cache/ci-cache-env.sh`,
-   `~/.ci-cache/cache-fingerprint.sh` (uploaded after each session so CI
-   can compare) and `~/.ci-cache/install-sccache.sh` (the image has no
-   sccache), and runs `boat env upgrade`. A repo without an environment needs `--create-env`.
-   Never use `base`: CI runners start from it.
-2. **Parity.** Copy the CI values of every variable that enters the keys
-   with `set-var`, for example `RUSTFLAGS` and `CARGO_TERM_COLOR`.
-3. **The agent guide.** In the repo's `AGENTS.md`/`CLAUDE.md`, a few lines:
-   - in a Boat sandbox (`BOAT_ID` set and `~/.ci-cache/` present), run
-     `bash ~/.ci-cache/install-sccache.sh` (Rust only), then
-     `bash ~/.ci-cache/ci-cache-env.sh`;
-   - `source ~/.ci-cache.env` in every shell that builds;
-   - run it again after a branch switch and every 6 h;
+Skip this without agents' sandboxes. A sandbox writes to the cache only if
+its agent opens a session; no provider runs it for you. Wire both ends:
+1. **Secrets.** `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY` (the label's key
+   from step 2) in the provider's secret store, so every shell sees them.
+2. **The client.** In the image or at boot, the engine's installer, pinned
+   to a commit and SHA-256 checked (`--rust` also installs CI's sccache):
+   ```bash
+   ref=<full commit SHA of OmarAlex24/ci-cache>
+   curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
+     bash -s -- --ref "$ref" --rust
+   ```
+3. **The path.** sccache keys include it: the sandbox clones at
+   `/home/user/<repo>`, or the CI step gets `workdir-path: <its path>`.
+4. **Parity.** Copy the CI values of every variable that enters the keys
+   into the sandbox's environment, for example `RUSTFLAGS` and
+   `CARGO_TERM_COLOR`.
+5. **The agent guide.** In the repo's `AGENTS.md`/`CLAUDE.md`, a few lines:
+   - when `~/.ci-cache/` is present, run
+     `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env` on the
+     PR's branch;
+   - `source ~/.ci-cache.env` in every shell that builds (it renews the
+     session after a `git switch` and before the 6 h expiry);
    - rebase onto `origin/main` before the final build.
-4. **Verify with one sandbox start**: build, rebuild after `cargo clean`,
-   and read `/v1/stats/branches`.
+6. **Verify with one sandbox**: build, rebuild after `cargo clean`, and read
+   `/v1/stats/branches`.
 
-Connecting a repo to sandboxes in Boat's GitHub settings, so that
-`boat env add-repo` works, is the Boat account owner's step.
-→ `references/sandbox.md`.
+**Boat recipe.** `scripts/connect-sandbox.sh <owner/repo> [env]
+[--label L]`, first with `--dry-run`, does 1 and 2 for a Boat environment:
+both variables from stdin, `~/.ci-cache/ci-cache-env.sh`,
+`cache-fingerprint.sh` and `install-sccache.sh` as secret files, then
+`boat env upgrade`. Boat clones at `/home/user/<repo>`, the action's
+default. A repo without an environment needs `--create-env`; never use
+`base` (CI runners start from it). Connecting a repo to sandboxes in Boat's
+GitHub settings, so that `boat env add-repo` works, is the Boat account
+owner's step. Other providers: the engine's `CONTRIBUTING.md` has a recipe
+template. → `references/sandbox.md`.
 
 ### 5. Verify
 - Read the PR run's `ci-cache cache key mismatch` warnings and the
@@ -228,8 +251,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 2. Compare job durations with `scripts/job-durations.sh`: first attempts
    only, 5 or more runs per variant. `--compare <commit>` (the onboarding
    commit) gives the before/after table to paste in the PR.
-3. Classify each run's Boat machine with `scripts/machine-class.sh`, and
-   compare only within a class.
+3. On Boat runners, classify each run's machine with
+   `scripts/machine-class.sh`, and compare only within a class.
 
 → `references/measurement.md`, `references/case-study.md`.
 
@@ -263,11 +286,12 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 
 ## Pitfalls
 
-- **Wrong path.** The Boat CI checkout is
-  `$HOME/actions-runner/_work/<repo>/<repo>`, but sandboxes build in
-  `/home/user/<repo>`. sccache hashes the cwd, so without the bind mount
-  nothing is reused. `mount-workdir: auto` mounts it, but the build must
-  run in `steps.<id>.outputs.workdir`.
+- **Wrong path.** CI checks out under the runner's work directory, but
+  sandboxes build where they clone (`/home/user/<repo>` in Boat). sccache
+  hashes the cwd, so without the bind mount nothing is reused.
+  `mount-workdir: auto` mounts at `workdir-path` (default
+  `/home/user/<repo>`), but the build must run in
+  `steps.<id>.outputs.workdir`.
 - **A `target/` restored from another path**, or one built without sccache,
   poisons the keys: sccache hashes `--extern` rlib content. Use
   `cache-targets: false` and bump `prefix-key`.
@@ -281,8 +305,9 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
   `1.97.1`: 5.6–150 s per run on Boat. `rustup --version` already installs
   the pin, so rename before any rustup call (`rust.md`).
 - **Wrong branch.** The sandbox session is per branch. A sandbox on a
-  differently named branch, or a stale `~/.ci-cache.env` after
-  `git switch`, writes where the PR never reads.
+  differently named branch writes where the PR never reads. Sourcing
+  `~/.ci-cache.env` renews the session after a `git switch`; a shell that
+  sourced it before the switch and never again still holds the old token.
 - **Not rebased.** PR CI compiles the merge with main. Rebase right before
   the sandbox's final build, or the crates that main changed will miss.
 - **Misreading `reuseAlert`.** It stays false below 20 sandbox writes, and
@@ -305,15 +330,14 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
   7 days. Reverting restores them.
 - Docker: drop the `--cache-from`/`--cache-to` flags. The retry path is
   already the uncached build.
-- A leaked key: mint a new one, upload the merged map without the old hash,
-  and update the Boat environment. → `references/keys.md`.
+- A leaked key: mint a new one (`--rotate`), upload the merged map without
+  the old hash, and update the sandbox provider's secret.
+  → `references/keys.md`.
 
 ## Not built yet
 
-- A Boat startup hook. Agents open the session because the repo's agent
-  guide says so; nothing runs it for them.
-- sccache installed by `ci-cache-env.sh` itself. Today the skill's
-  installer is a second secret file next to it.
+- A startup hook in sandboxes. Agents open the session because the repo's
+  agent guide says so; nothing runs it for them.
 - The toolchain rename in sandboxes. Each sandbox downloads the pinned
   release once; `ci-cache-env.sh` could rename the image's `stable` like
   CI does.
