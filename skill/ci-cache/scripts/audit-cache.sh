@@ -95,7 +95,7 @@ echo "== cache steps in .github/workflows"
 if ((${#workflows[@]} == 0)); then
   note "no workflows"
 else
-  for pattern in '/ci-cache/setup@' 'id-token: *write' 'mount-workdir' 'Swatinem/rust-cache' \
+  for pattern in '/ci-cache/setup@|\.github/actions/ci-cache/setup' 'id-token: *write' 'mount-workdir' 'Swatinem/rust-cache' \
     'prefix-key|cache-targets|save-if' 'mozilla-actions/sccache-action|RUSTC_WRAPPER|SCCACHE_' \
     'actions/cache(/restore|/save)?@' 'cache: *(pnpm|npm|yarn|true)|cache-dependency-path' \
     'TURBO_(TOKEN|TEAM|API|REMOTE_ONLY|CACHE)' 'docker (buildx )?build|docker/build-push-action' \
@@ -114,7 +114,7 @@ echo "== checks"
 for f in ${workflows[@]+"${workflows[@]}"}; do
   rel=${f#"$dir"/}
   rc=$(grep -n 'Swatinem/rust-cache' "$f" | head -1 | cut -d: -f1)
-  cc=$(grep -n '/ci-cache/setup@' "$f" | head -1 | cut -d: -f1)
+  cc=$(grep -n -E '/ci-cache/setup@|\.github/actions/ci-cache/setup' "$f" | head -1 | cut -d: -f1)
   if [[ -n $rc && -n $cc && $rc -lt $cc ]]; then
     warn "$rel: rust-cache (line $rc) runs before ci-cache (line $cc): RUSTC_WRAPPER is not in its key"
   fi
@@ -139,7 +139,7 @@ for f in ${workflows[@]+"${workflows[@]}"}; do
     warn "$rel: docker build with a cache and no visible uncached retry (ignore-error covers only the export)"
   fi
 done
-[[ " ${found[*]-} " == *" rust "* ]] && ! wgrep '/ci-cache/setup@' >/dev/null && note "Rust present and no ci-cache step yet: start with references/rust.md"
+[[ " ${found[*]-} " == *" rust "* ]] && ! wgrep '/ci-cache/setup@|\.github/actions/ci-cache/setup' >/dev/null && note "Rust present and no ci-cache step yet: start with references/rust.md"
 
 if [[ -n $repo ]]; then
   echo
