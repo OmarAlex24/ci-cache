@@ -16,14 +16,15 @@
     "cf-typegen": "wrangler types --include-env=false",
     "e2e:turbo": "node scripts/e2e/turbo.mjs",
     "e2e:sccache": "node scripts/e2e/sccache.mjs",
-    "e2e": "pnpm e2e:turbo && pnpm e2e:sccache && pnpm e2e:sandbox && pnpm e2e:setup && pnpm e2e:fingerprint && pnpm e2e:report && pnpm e2e:bootstrap",
+    "e2e": "pnpm e2e:turbo && pnpm e2e:sccache && pnpm e2e:sandbox && pnpm e2e:setup && pnpm e2e:fingerprint && pnpm e2e:report && pnpm e2e:bootstrap && pnpm e2e:durations",
     "lint:openapi": "pnpm --package=@redocly/cli@2.65.0 dlx redocly lint openapi.yaml",
     "e2e:sandbox": "node scripts/e2e/sandbox-env.mjs",
     "e2e:setup": "node scripts/e2e/setup-action.mjs",
     "e2e:fingerprint": "node scripts/e2e/fingerprint.mjs",
     "e2e:report": "node scripts/e2e/report.mjs",
     "e2e:bootstrap": "node scripts/e2e/bootstrap.mjs",
-    "lint:sh": "shellcheck setup/setup.sh setup/fingerprint-compare.sh report/report.sh scripts/ci-cache-env.sh scripts/fingerprint-diff.sh scripts/bootstrap.sh && shellcheck -e SC1091 scripts/cache-fingerprint.sh && cmp scripts/fingerprint-diff.sh skill/ci-cache/scripts/fingerprint-diff.sh"
+    "lint:sh": "shellcheck setup/setup.sh setup/fingerprint-compare.sh report/report.sh scripts/ci-cache-env.sh scripts/fingerprint-diff.sh scripts/bootstrap.sh scripts/job-durations.sh && shellcheck -e SC1091 scripts/cache-fingerprint.sh && cmp scripts/fingerprint-diff.sh skill/ci-cache/scripts/fingerprint-diff.sh && cmp scripts/job-durations.sh skill/ci-cache/scripts/job-durations.sh",
+    "e2e:durations": "node scripts/e2e/job-durations.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.23.0",

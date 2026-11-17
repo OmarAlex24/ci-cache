@@ -65,7 +65,7 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `src/stats/` | `/v1/stats`, `/v1/stats/branches`, `/v1/stats/repos` (AE SQL API) |
 | `setup/` | the composite GitHub Action (`action.yml` + `setup.sh` + `fingerprint-compare.sh`) |
 | `report/` | the report action (`action.yml` + `report.sh`): a job summary table at the end of the job |
-| `scripts/` | `bootstrap.sh` (deploy your own instance), `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` (the skill keeps an identical copy), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
+| `scripts/` | `bootstrap.sh` (deploy your own instance), `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` and `job-durations.sh` (the skill keeps identical copies), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
 | `test/` | vitest in the Workers runtime (`@cloudflare/vitest-pool-workers`) |
 | `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine |
 | `openapi.yaml` | the API contract; keep it in sync with `src/` |

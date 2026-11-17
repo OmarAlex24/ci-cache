@@ -27,6 +27,17 @@ and the traps it found.
   bash scripts/job-durations.sh O/R --job ci --event pull_request --limit 20
   ```
 
+  For the before/after of onboarding, `--compare` splits the runs at a date
+  or at the commit that enabled ci-cache (its committer date) and prints a
+  markdown table of the medians, ready for the PR:
+
+  ```bash
+  bash scripts/job-durations.sh O/R --job ci --event pull_request --compare <commit>
+  ```
+
+  It checks the remaining API quota first (about 2 × `--limit` calls). The
+  script is an identical copy of the engine's `scripts/job-durations.sh`.
+
   The run's wall-clock time (`gh run list`) includes queueing. Don't use it.
 - **Per task**: boated-ci's `task-metrics.ts` table gives the seconds per
   task and the machine's CPU and steal in each task's window. Use it to find
