@@ -9,7 +9,7 @@
 #      (the Boat image has cargo but no sccache);
 #   4. runs `boat env upgrade` so live sandboxes get the new version.
 #
-#   connect-sandbox.sh <owner/repo> [env] [--dry-run] [--create-env] [--dir DIR]
+#   connect-sandbox.sh <owner/repo> [env] [--dry-run] [--create-env] [--dir DIR] [--label L]
 #
 #   env           Boat environment to change. Default: the one whose repos include
 #                 <owner/repo>; else the one named like the repo. Refuses on ambiguity.
@@ -20,6 +20,7 @@
 #   --dir         in-sandbox directory for both files, relative to the sandbox home
 #                 (default .ci-cache -> /home/user/.ci-cache). Boat writes them mode 644:
 #                 run them with `bash`.
+#   --label       the key's label in mint-sandbox-key.sh (default: the label-less key)
 #
 # Env:
 #   CI_CACHE_URL       your Worker's URL (else read from $CI_CACHE_KEYS_DIR/url), e.g. https://ci-cache.<your-subdomain>.workers.dev
@@ -37,7 +38,7 @@ set -euo pipefail
 set +x # never trace this script: it moves a plaintext key
 
 usage() {
-  sed -n '3,31p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 die() {
@@ -46,7 +47,7 @@ die() {
 }
 redact() { sed -E 's/(sk|rk)_[A-Za-z0-9_-]+/\1_***/g'; }
 
-repo="" env_name="" dry_run=false create_env=false dir=.ci-cache
+repo="" env_name="" dry_run=false create_env=false dir=.ci-cache label=""
 while (($#)); do
   case $1 in
     --dry-run) dry_run=true ;;
@@ -57,6 +58,11 @@ while (($#)); do
       shift
       ;;
     --dir=*) dir=${1#*=} ;;
+    --label)
+      (($# >= 2)) || usage
+      label=$2
+      shift
+      ;;
     -h | --help) usage ;;
     -*) usage ;;
     *)
@@ -109,14 +115,17 @@ for pin in VERSION SHA256_X86_64 SHA256_AARCH64; do
     die "SCCACHE_$pin in $installer differs from DEFAULT_SCCACHE_$pin in $engine/setup/setup.sh"
 done
 
-# my-repo -> CI_CACHE_SANDBOX_KEY_MY_REPO, app.web -> ..._APP_WEB (bash 3.2-safe).
-key_var=CI_CACHE_SANDBOX_KEY_$(printf '%s' "${repo#*/}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_')
+# my-repo -> CI_CACHE_SANDBOX_KEY_MY_REPO, app.web -> ..._APP_WEB (bash 3.2-safe); with
+# --label, the key mint-sandbox-key.sh stored for that label: ..._MY_REPO__<LABEL>.
+upper() { printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_'; }
+key_var=CI_CACHE_SANDBOX_KEY_$(upper "${repo#*/}")
+if [[ -n $label && $label != sandbox ]]; then key_var=${key_var}__$(upper "$label"); fi
 
 # The key must exist and look like a sandbox key. Checked in a subshell: nothing leaks
 # into this shell, and only the exit code comes back.
 # shellcheck source=/dev/null
 (set +x; . "$keys_file"; [[ ${!key_var:-} == sk_* ]]) ||
-  die "$key_var is missing from $keys_file or is not an sk_ key (mint it: mint-sandbox-key.sh $repo)"
+  die "$key_var is missing from $keys_file or is not an sk_ key (mint it: mint-sandbox-key.sh $repo${label:+ $label})"
 
 "$boat" env list --json --no-update >/dev/null 2>&1 || die "boat env list failed (signed in? try: $boat status)"
 
