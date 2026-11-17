@@ -3,7 +3,7 @@
 # the plaintext goes to keys.env, its sha256 entry is merged into sandbox_keys.json
 # (the full SANDBOX_KEYS map that gets uploaded to the Worker).
 #
-#   mint-sandbox-key.sh <owner/repo> [label] [--rotate]
+#   mint-sandbox-key.sh <owner/repo> [label] [--rotate] [--branches 'agent/*,fix/**']
 #
 # One key per repo and label, so each sandbox provider (or machine pool) gets its own key
 # and rotates on its own. Without a label (or with the default one, "sandbox") the key is
@@ -11,6 +11,8 @@
 # label, as CI_CACHE_SANDBOX_KEY_<REPO>__<LABEL>. A second key for the same repo and label
 # is refused; --rotate replaces it and drops the old one's hash from the map (also a key
 # minted before labels had their own variable, found by its label in the map).
+# --branches binds the key to branch patterns (`*` within one path segment, `**` across
+# `/`): the Worker answers 403 to a session for any other branch. Without it, any branch.
 #
 # Env:
 #   CI_CACHE_KEYS_DIR  key directory (default ~/.config/ci-cache)
@@ -24,21 +26,27 @@ set -euo pipefail
 set +x # never trace this script: it handles a plaintext key
 
 usage() {
-  echo "usage: mint-sandbox-key.sh <owner/repo> [label] [--rotate]" >&2
+  echo "usage: mint-sandbox-key.sh <owner/repo> [label] [--rotate] [--branches <pattern,...>]" >&2
   exit 2
 }
 
 DEFAULT_LABEL=sandbox
-repo="" label=$DEFAULT_LABEL rotate=false
-for arg in "$@"; do
-  case $arg in
+repo="" label=$DEFAULT_LABEL rotate=false branches=""
+while (($#)); do
+  case $1 in
     --rotate) rotate=true ;;
+    --branches)
+      [[ -n ${2:-} ]] || usage
+      branches=$2
+      shift
+      ;;
     -h | --help) usage ;;
     -*) usage ;;
     *)
-      if [[ -z $repo ]]; then repo=$arg; else label=$arg; fi
+      if [[ -z $repo ]]; then repo=$1; else label=$1; fi
       ;;
   esac
+  shift
 done
 [[ $repo == */* ]] || usage
 [[ $label =~ ^[A-Za-z0-9._-]{1,40}$ ]] || { echo "label: 1-40 letters, digits, '.', '_' or '-'" >&2; exit 2; }
@@ -107,7 +115,9 @@ done <"$env_file"
 unset line value
 
 # new-key.mjs prints: line 1 "...: <key>", line 2 a heading, line 3 the JSON entry.
-out=$(node "$new_key" sandbox "$repo_id" "$repo" "$label")
+branch_args=()
+if [[ -n $branches ]]; then branch_args=(--branches "$branches"); fi
+out=$(node "$new_key" sandbox "$repo_id" "$repo" "$label" ${branch_args[@]+"${branch_args[@]}"}) || exit 2
 key=$(printf '%s\n' "$out" | sed -n '1s/.*: //p')
 entry=$(printf '%s\n' "$out" | sed -n '3p')
 unset out
@@ -135,6 +145,7 @@ trap - EXIT
 count=$(jq 'length' "$map_file")
 per_repo=$(jq --argjson id "$repo_id" '[.[] | select(.repoId == $id)] | length' "$map_file")
 echo "ci-cache: sandbox key for $repo (id $repo_id), label '$label', stored as $var in $env_file"
+if [[ -n $branches ]]; then echo "ci-cache: bound to the branches $branches (any other branch gets a 403)"; fi
 if [[ -n $old_hashes ]]; then echo "ci-cache: the replaced key's entry was removed from the map"; fi
 echo "ci-cache: $repo now has $per_repo sandbox key(s): $(jq -r --argjson id "$repo_id" '[.[] | select(.repoId == $id) | .label] | sort | join(", ")' "$map_file")"
 echo "ci-cache: $map_file now holds $count entries: $(jq -r '[.[] | .repo] | sort | join(", ")' "$map_file")"

@@ -83,9 +83,18 @@ try {
   r = await mint("no spaces allowed");
   check(r.code === 2 && r.out.includes("label:"), "a label with spaces is refused");
 
+  console.log("6b. --branches binds the key to branch patterns");
+  r = await mint("agents", "--branches", "agent/*,fix/**");
+  check(r.code === 0 && r.out.includes("bound to the branches agent/*,fix/**"), `exits 0 and says so${r.code ? `: ${r.out}` : ""}`);
+  const bound = keys()[`${VAR}__AGENTS`];
+  check(JSON.stringify(map()[sha(bound)]?.branches) === JSON.stringify(["agent/*", "fix/**"]), "the map entry has branches: [agent/*, fix/**]");
+  const entries = Object.keys(map()).length;
+  r = await mint("pool2", "--branches", "has space");
+  check(r.code === 2 && Object.keys(map()).length === entries && !(`${VAR}__POOL2` in keys()), "a bad pattern is refused and changes nothing");
+
   console.log("7. never prints a key");
   const all = printed.join("\n");
-  const stored = [first, second, rotated, legacy, ...Object.values(keys())];
+  const stored = [first, second, rotated, legacy, bound, ...Object.values(keys())];
   check(stored.every((key) => !all.includes(key)), "no key appears in any output");
   check(!/sk_[A-Za-z0-9_-]{20,}/.test(all), "nor anything shaped like one");
 

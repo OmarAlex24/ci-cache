@@ -14,8 +14,16 @@ const REPO_ID = 555000111;
 
 const key = `sk_${randomBytes(24).toString("base64url")}`;
 const hash = createHash("sha256").update(key).digest("hex");
+// A second key, bound to the branches agent/* (SANDBOX_KEYS `branches`).
+const boundKey = `sk_${randomBytes(24).toString("base64url")}`;
+const boundHash = createHash("sha256").update(boundKey).digest("hex");
 const worker = await startWorker({
-  vars: { SANDBOX_KEYS: JSON.stringify({ [hash]: { repoId: REPO_ID, repo: REPO, label: "e2e" } }) },
+  vars: {
+    SANDBOX_KEYS: JSON.stringify({
+      [hash]: { repoId: REPO_ID, repo: REPO, label: "e2e" },
+      [boundHash]: { repoId: REPO_ID, repo: REPO, label: "agents", branches: ["agent/*"] },
+    }),
+  },
 });
 const work = mkdtempSync(join(tmpdir(), "ci-cache-sandbox-e2e-"));
 
@@ -169,6 +177,12 @@ try {
   r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_BRANCH: "pinned/branch" } });
   s = await source({ pre: "git -C '" + repoDir + "' checkout -q feature/switched;" });
   check(r.code === 0 && s.rc === 0 && s.stderr === "" && claims(s.token).branch === "pinned/branch", "a branch pinned with CI_CACHE_BRANCH is kept: no renewal on a switch");
+
+  console.log("7. a key bound to branch patterns");
+  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_SANDBOX_KEY: boundKey, CI_CACHE_BRANCH: "agent/fix-1" } });
+  check(r.code === 0 && claims(r.loaded.TURBO_TOKEN).branch === "agent/fix-1" && claims(r.loaded.TURBO_TOKEN).tier === "rama", "a matching branch gets a rama session");
+  r = await sandboxEnv({ dir: repoDir, home, extraEnv: { CI_CACHE_SANDBOX_KEY: boundKey, CI_CACHE_BRANCH: "main" } });
+  check(r.code !== 0 && r.output.includes("answered 403") && !r.output.includes(boundKey), "another branch fails loudly with the 403, without printing the key");
 
   console.log("e2e ci-cache-env.sh: OK");
 } catch (error) {
