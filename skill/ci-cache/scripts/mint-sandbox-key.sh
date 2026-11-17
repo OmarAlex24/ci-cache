@@ -12,7 +12,8 @@
 # is refused; --rotate replaces it and drops the old one's hash from the map (also a key
 # minted before labels had their own variable, found by its label in the map).
 # --branches binds the key to branch patterns (`*` within one path segment, `**` across
-# `/`): the Worker answers 403 to a session for any other branch. Without it, any branch.
+# `/`): the Worker answers 403 to a session for any other branch. Without it, any branch;
+# --rotate without --branches keeps the replaced key's patterns.
 #
 # Env:
 #   CI_CACHE_KEYS_DIR  key directory (default ~/.config/ci-cache)
@@ -115,6 +116,15 @@ done <"$env_file"
 unset line value
 
 # new-key.mjs prints: line 1 "...: <key>", line 2 a heading, line 3 the JSON entry.
+# A rotation keeps the replaced key's patterns unless --branches gives new ones: a rotated
+# key must never silently lose its binding.
+kept_branches=false
+if [[ -z $branches && -n $old_hashes ]]; then
+  branches=$(jq -r --arg old "$old_hashes" \
+    '($old | split("\n")) as $h | [to_entries[] | select(.key as $k | $h | index($k)) | .value.branches // empty]
+     | first // empty | join(",")' "$map_file")
+  if [[ -n $branches ]]; then kept_branches=true; fi
+fi
 branch_args=()
 if [[ -n $branches ]]; then branch_args=(--branches "$branches"); fi
 out=$(node "$new_key" sandbox "$repo_id" "$repo" "$label" ${branch_args[@]+"${branch_args[@]}"}) || exit 2
@@ -145,7 +155,9 @@ trap - EXIT
 count=$(jq 'length' "$map_file")
 per_repo=$(jq --argjson id "$repo_id" '[.[] | select(.repoId == $id)] | length' "$map_file")
 echo "ci-cache: sandbox key for $repo (id $repo_id), label '$label', stored as $var in $env_file"
-if [[ -n $branches ]]; then echo "ci-cache: bound to the branches $branches (any other branch gets a 403)"; fi
+if [[ -n $branches ]]; then
+  echo "ci-cache: bound to the branches $branches (any other branch gets a 403)$($kept_branches && echo "; kept from the replaced key")"
+fi
 if [[ -n $old_hashes ]]; then echo "ci-cache: the replaced key's entry was removed from the map"; fi
 echo "ci-cache: $repo now has $per_repo sandbox key(s): $(jq -r --argjson id "$repo_id" '[.[] | select(.repoId == $id) | .label] | sort | join(", ")' "$map_file")"
 echo "ci-cache: $map_file now holds $count entries: $(jq -r '[.[] | .repo] | sort | join(", ")' "$map_file")"

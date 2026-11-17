@@ -9,7 +9,7 @@ export interface Env {
 
   /** Secret: HMAC key for session tokens (≥ 32 characters). */
   SESSION_SECRET: string;
-  /** Secret: JSON `{ "<sha256 hex of the key>": { repoId, repo, label } }`. */
+  /** Secret: JSON `{ "<sha256 hex of the key>": { repoId, repo, label, branches? } }` (src/session/keys.ts). */
   SANDBOX_KEYS?: string;
   /** Secret: JSON `{ "<sha256 hex of the key>": { label, repoIds? } }`, read-only keys for /v1/stats. */
   STATS_KEYS?: string;

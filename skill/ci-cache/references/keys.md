@@ -63,8 +63,10 @@ bash <skill-dir>/scripts/mint-sandbox-key.sh <owner>/<repo> [label]
 - `--branches 'agent/*,fix/**'` binds the key to branch patterns (`*`
   within one path segment, `**` across `/`): the Worker answers 403 to a
   session for any other branch, so a leaked key or a confused agent can't
-  write into another PR's tier. Without it, any branch of the repo. To
-  change a key's patterns, mint it again with `--rotate`, or edit the
+  write into another PR's tier. Without it, any branch of the repo.
+  `--rotate` keeps the replaced key's patterns unless `--branches` gives
+  new ones. To change a key's patterns, mint it again with `--rotate
+  --branches …`, or edit the
   `branches` field of its entry in `sandbox_keys.json` (no key is printed),
   then upload the map.
 - It prints the variable name, the repo's labels, the number of entries in
