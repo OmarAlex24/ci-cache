@@ -19,6 +19,7 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `src/metrics/record.ts` | one Analytics Engine data point per cache request |
 | `src/stats/` | `/v1/stats`, `/v1/stats/branches`, `/v1/stats/repos` (AE SQL API) |
 | `setup/` | the composite GitHub Action (`action.yml` + `setup.sh` + `fingerprint-compare.sh`) |
+| `report/` | the report action (`action.yml` + `report.sh`): a job summary table at the end of the job |
 | `scripts/` | `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` (the skill keeps an identical copy), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
 | `test/` | vitest in the Workers runtime (`@cloudflare/vitest-pool-workers`) |
 | `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine |
@@ -80,11 +81,14 @@ jobs:
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
           url: ${{ vars.CI_CACHE_URL }}    # https://ci-cache.<your-subdomain>.workers.dev
-          mount-workdir: "true"            # Rust only: build at /home/user/<repo>, like sandboxes
+          # mount-workdir: auto (default): with a Cargo.toml, build at /home/user/<repo> like sandboxes
       - working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
         run: |
           pnpm turbo run build test
           cargo build --locked
+      - if: always()                       # job summary: hits, misses, fingerprint check
+        continue-on-error: true
+        uses: OmarAlex24/ci-cache/report@<sha>  # the same SHA as setup
 ```
 
 The repo's owner must be in the Worker's `ALLOWED_OWNERS`, or `/v1/session` answers 403.
@@ -106,7 +110,8 @@ bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env   # again after every
   `main-ro`);
 - with Rust: `RUSTC_WRAPPER=sccache`, `SCCACHE_WEBDAV_ENDPOINT`, `SCCACHE_WEBDAV_TOKEN`,
   `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true`, `CARGO_INCREMENTAL=0`;
-- action outputs: `tier`, `branch`, `expires-at`, `workdir`.
+- `TURBO_RUN_SUMMARY=true` (for the report action; not if the job sets it);
+- action outputs: `tier`, `branch`, `expires-at`, `workdir`, `fingerprint-compare`.
 
 **Check that it hits:**
 - the action logs `ci-cache: session <tier> (branch <branch>) until <expiry>`: `rama` on a

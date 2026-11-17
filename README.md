@@ -34,6 +34,10 @@ No dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](open
            with:
              url: https://ci-cache.<your-subdomain>.workers.dev
          - run: pnpm turbo run build   # and/or cargo build: both now go through the Worker
+           working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
+         - if: always()                # last step: hits, misses and the fingerprint check
+           continue-on-error: true
+           uses: OmarAlex24/ci-cache/report@<sha>
    ```
 3. **Sandboxes** (optional). Mint a sandbox key, add its hash to `SANDBOX_KEYS`, put the
    key in the sandbox as `CI_CACHE_SANDBOX_KEY`, then run
@@ -58,7 +62,7 @@ runs against `wrangler dev` in `scripts/e2e/`.
 | C/C++ via sccache | Should work, untested | Nothing in `/dav/` is Rust-specific. But `sccache: auto` only detects a `Cargo.toml` and the action only exports `RUSTC_WRAPPER`: set `sccache: "true"` and your own launcher (`CMAKE_C_COMPILER_LAUNCHER=sccache`, `CC="sccache gcc"`, …) |
 | Docker / BuildKit layers | Not served by ci-cache | The skill recommends BuildKit `type=gha` (the Actions cache); ci-cache has no Docker credentials or registry API |
 | Nx, Bazel, Gradle | Not served by ci-cache | Not supported: their remote cache protocols are not implemented ([adding support](#adding-support-for-your-stack)) |
-| GitHub Actions | Tested (e2e) | Sessions from GitHub OIDC. `setup/setup.sh` is tested with a fake OIDC endpoint (the real one only exists inside Actions). Linux runners; the sccache install and `mount-workdir` are Linux-only, so a macOS runner can use Turbo only (`sccache: "false"`, should work, untested) |
+| GitHub Actions | Tested (e2e) | Sessions from GitHub OIDC. `setup/setup.sh` is tested with a fake OIDC endpoint (the real one only exists inside Actions). Linux runners; the sccache install and `mount-workdir` are Linux-only (`mount-workdir: auto` skips the mount elsewhere), so a macOS runner can use Turbo only (`sccache: "false"`, should work, untested) |
 | Boat sandboxes | Tested (e2e) | `scripts/ci-cache-env.sh` with an `sk_` key against `wrangler dev`. Any environment that can run a bash script with an `sk_` key should work the same way (untested) |
 | Other CI providers (GitLab, CircleCI, Buildkite, …) | Not served by ci-cache | Not supported: only GitHub's OIDC issuer is accepted. An `sk_` key would work technically, but always gets the branch tier, so it could never fill `main/` |
 
@@ -398,12 +402,14 @@ jobs:
         uses: OmarAlex24/ci-cache/setup@<sha>
         with:
           url: https://ci-cache.<your-subdomain>.workers.dev
-          mount-workdir: "true"   # builds at /home/user/<repo>, like the sandboxes
-      - working-directory: ${{ steps.cache.outputs.workdir }}
+          # mount-workdir: auto (default): with Rust, builds at /home/user/<repo> like the sandboxes
+      - working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
         run: |
           pnpm turbo run build
           cargo build --locked
-          sccache --show-stats
+      - if: always()
+        continue-on-error: true
+        uses: OmarAlex24/ci-cache/report@<sha>   # the same SHA as setup
 ```
 
 The action requests the OIDC token (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`) with the
@@ -418,15 +424,50 @@ audience `audience` (default `ci-cache`), calls `POST /v1/session`, masks the to
   `sccache-sha256`) and exports `RUSTC_WRAPPER=sccache`, `SCCACHE_WEBDAV_ENDPOINT=<url>/dav`,
   `SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true` (no `PROPFIND` before each
   write) and `CARGO_INCREMENTAL=0`.
-- `mount-workdir: "true"` mounts the checkout with `sudo mount --bind "$GITHUB_WORKSPACE"
+- `mount-workdir` mounts the checkout with `sudo mount --bind "$GITHUB_WORKSPACE"
   /home/user/<repo>` (the path Boat sandboxes clone to) so that sccache keys match; the
-  `workdir` output says where to build.
+  `workdir` output says where to build. `auto` (the default) mounts only when there is a
+  `Cargo.toml` (the same detection as `sccache: auto`), on Linux, with passwordless sudo;
+  otherwise, or if the target isn't empty or the mount fails, it logs why and builds in
+  `GITHUB_WORKSPACE`. `"true"` mounts or fails the step; `"false"` never mounts. Build in
+  `${{ steps.cache.outputs.workdir || github.workspace }}`.
+- `TURBO_RUN_SUMMARY=true` (unless the job already sets it; `turbo-summary: "false"` to
+  skip): turbo writes `.turbo/runs/*.json`, as with `--summarize`, so the report action can
+  count Turbo cache hits without changing your command.
 - Outputs: `tier`, `branch`, `expires-at`, `workdir`.
 - Then it prints the cache fingerprint (`scripts/cache-fingerprint.sh`; `fingerprint: "false"`
   to skip it) and compares it with the sandbox's for the same branch, warning about every
   line that makes the cache miss (`fingerprint-compare: "false"` to skip it;
   [details](#sandbox-vs-ci-fingerprints)).
 - Outputs also include `fingerprint-compare` (`match`, `mismatch`, `none`, `skipped`, `error`).
+- At the end of the job, `report/` turns all of this into a table in the job summary
+  ([Job summary](#job-summary-reportactionyml)).
+
+### Job summary: `report/action.yml`
+
+The last step of the job, after everything that builds:
+
+```yaml
+      - name: ci-cache report
+        if: always()
+        continue-on-error: true
+        uses: OmarAlex24/ci-cache/report@<sha>   # the same SHA as setup
+```
+
+It writes one table to the job summary (`$GITHUB_STEP_SUMMARY`):
+
+| Row | Source |
+| --- | --- |
+| Session | the tier and branch the setup action got (inputs `tier`/`branch` override them) |
+| sccache | hits, misses and hit rate from `sccache --show-stats --stats-format json`, if sccache is on `PATH` |
+| Turbo | tasks from cache vs executed (and how many from the remote cache), from the `.turbo/runs/*.json` this job wrote; the setup action exports `TURBO_RUN_SUMMARY=true` so no `--summarize` is needed |
+| Fingerprint vs sandbox | the result of the setup action's comparison (`match`, the number of key lines that differ, no sandbox fingerprint, or skipped) |
+
+It never fails the job and never prints sccache's cache location (it holds the Worker URL).
+Composite actions have no post steps, which is why it is a separate action. sccache stats
+need the server alive until then: set `SCCACHE_IDLE_TIMEOUT: "0"` in the job's `env:`.
+Turbo summaries are looked for under `working-directory` (default the setup action's
+`workdir`), up to 4 levels deep.
 
 ### Boat sandbox: `scripts/ci-cache-env.sh`
 
@@ -523,7 +564,9 @@ pnpm lint:sh                        # shellcheck of the client scripts
   only exists inside Actions) and, if Docker is available, runs the SHA-256-checked sccache
   install and the `mount --bind` on Ubuntu. `pnpm e2e:fingerprint` uploads a sandbox
   fingerprint with `ci-cache-env.sh` and runs the action's comparison step against it
-  (different `RUSTFLAGS` → one warning; same values → none).
+  (different `RUSTFLAGS` → one warning; same values → none). `pnpm e2e:report` runs the
+  report action's script on fixtures taken from real turbo and sccache output, and on a
+  real turbo run with `TURBO_RUN_SUMMARY=true`.
 - Analytics Engine can't be queried locally: the query sits behind the `AnalyticsClient`
   interface and the tests check the generated SQL and the shape of the responses.
 

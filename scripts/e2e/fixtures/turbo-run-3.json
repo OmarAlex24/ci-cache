@@ -1,0 +1,174 @@
+{
+  "id": "3MDA1SUTSb762TiIHpjvNfLbCnw",
+  "version": "1",
+  "turboVersion": "2.11.10",
+  "monorepo": true,
+  "globalCacheInputs": {
+    "rootKey": "I can’t see ya, but I know you’re here",
+    "files": {
+      "package.json": "f21e2a51595cf80372167e2f2d2cfce1111c26bd"
+    },
+    "hashOfExternalDependencies": "",
+    "hashOfInternalDependencies": "",
+    "environmentVariables": {
+      "specified": {
+        "env": [],
+        "passThroughEnv": null
+      },
+      "configured": [],
+      "inferred": [],
+      "passthrough": null
+    },
+    "engines": null
+  },
+  "execution": {
+    "command": "turbo run build",
+    "repoPath": "",
+    "success": 0,
+    "failed": 0,
+    "cached": 2,
+    "attempted": 2,
+    "startTime": 1794874548080,
+    "endTime": 1794874548083,
+    "exitCode": 0
+  },
+  "packages": [
+    "app",
+    "lib"
+  ],
+  "envMode": "strict",
+  "frameworkInference": true,
+  "tasks": [
+    {
+      "taskId": "app#build",
+      "task": "build",
+      "package": "app",
+      "hash": "add6a7aa54e45af4",
+      "inputs": {
+        ".turbo/turbo-build.log": "b9fa19a709711cfd8f9a62d891bbee313d053a0e",
+        "b.js": "34506691d2bcfe1287135eee0123959945ff1c7e",
+        "package.json": "964ce7a78541ff9ad3b55aa554e60482aef7784b"
+      },
+      "hashOfExternalDependencies": "",
+      "cache": {
+        "local": true,
+        "remote": false,
+        "status": "HIT",
+        "source": "LOCAL",
+        "timeSaved": 166,
+        "sha": "9a12ba7a33fbbc5166c88a848f57d458dc5d55aa",
+        "dirtyHash": "30c17f06928f7a0dac990f77a0944342cc90777a2bee897c193e225c269b69d9"
+      },
+      "command": "node b.js",
+      "cliArguments": [],
+      "outputs": [
+        "dist/**"
+      ],
+      "excludedOutputs": null,
+      "logFile": "packages/app/.turbo/turbo-build.log",
+      "directory": "packages/app",
+      "dependencies": [],
+      "dependents": [],
+      "with": [],
+      "resolvedTaskDefinition": {
+        "outputs": [
+          "dist/**"
+        ],
+        "cache": true,
+        "dependsOn": [],
+        "inputs": [],
+        "outputLogs": "full",
+        "persistent": false,
+        "interruptible": false,
+        "env": [],
+        "passThroughEnv": null,
+        "interactive": false
+      },
+      "expandedOutputs": [
+        "packages/app/.turbo/turbo-build.log",
+        "packages/app/dist"
+      ],
+      "framework": "",
+      "envMode": "strict",
+      "environmentVariables": {
+        "specified": {
+          "env": [],
+          "passThroughEnv": null
+        },
+        "configured": [],
+        "inferred": [],
+        "passthrough": null
+      },
+      "execution": {
+        "startTime": 1794874548083,
+        "endTime": 1794874548083,
+        "exitCode": 0
+      }
+    },
+    {
+      "taskId": "lib#build",
+      "task": "build",
+      "package": "lib",
+      "hash": "d8ce74a5c65add3b",
+      "inputs": {
+        ".turbo/turbo-build.log": "07a352aaa541300bafe7b52b59b244125af242c5",
+        "package.json": "fe47c9d661a2f3727b978e24da35bb51f3051ed9"
+      },
+      "hashOfExternalDependencies": "",
+      "cache": {
+        "local": true,
+        "remote": false,
+        "status": "HIT",
+        "source": "LOCAL",
+        "timeSaved": 173,
+        "sha": "9a12ba7a33fbbc5166c88a848f57d458dc5d55aa",
+        "dirtyHash": "30c17f06928f7a0dac990f77a0944342cc90777a2bee897c193e225c269b69d9"
+      },
+      "command": "node -e 1",
+      "cliArguments": [],
+      "outputs": [
+        "dist/**"
+      ],
+      "excludedOutputs": null,
+      "logFile": "packages/lib/.turbo/turbo-build.log",
+      "directory": "packages/lib",
+      "dependencies": [],
+      "dependents": [],
+      "with": [],
+      "resolvedTaskDefinition": {
+        "outputs": [
+          "dist/**"
+        ],
+        "cache": true,
+        "dependsOn": [],
+        "inputs": [],
+        "outputLogs": "full",
+        "persistent": false,
+        "interruptible": false,
+        "env": [],
+        "passThroughEnv": null,
+        "interactive": false
+      },
+      "expandedOutputs": [
+        "packages/lib/.turbo/turbo-build.log"
+      ],
+      "framework": "",
+      "envMode": "strict",
+      "environmentVariables": {
+        "specified": {
+          "env": [],
+          "passThroughEnv": null
+        },
+        "configured": [],
+        "inferred": [],
+        "passthrough": null
+      },
+      "execution": {
+        "startTime": 1794874548083,
+        "endTime": 1794874548083,
+        "exitCode": 0
+      }
+    }
+  ],
+  "repoPath": ""
+}

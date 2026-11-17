@@ -124,8 +124,13 @@ for f in ${workflows[@]+"${workflows[@]}"}; do
   if [[ -n $cc ]] && ! grep -q -E 'id-token: *write' "$f"; then
     warn "$rel: uses ci-cache but grants no id-token: write"
   fi
-  if [[ -n $cc ]] && ! grep -q -E 'mount-workdir: *"?true' "$f" && [[ " ${found[*]-} " == *" rust "* ]]; then
-    warn "$rel: ci-cache without mount-workdir: CI builds at another path than the sandboxes"
+  # mount-workdir defaults to auto (mounts on Linux when there is a Cargo.toml): only an
+  # explicit false keeps CI at another path than the sandboxes.
+  if [[ -n $cc ]] && grep -q -E 'mount-workdir: *"?false' "$f" && [[ " ${found[*]-} " == *" rust "* ]]; then
+    warn "$rel: ci-cache with mount-workdir: false: CI builds at another path than the sandboxes"
+  fi
+  if [[ -n $cc ]] && ! grep -q -E '/ci-cache/report@' "$f"; then
+    note "$rel: no ci-cache/report step: the job summary won't show sccache/Turbo hits or the fingerprint check"
   fi
   if grep -q -E 'TURBO_TOKEN: *\$\{\{ *secrets\.' "$f"; then
     warn "$rel: TURBO_TOKEN from a secret (Vercel?): remove it when moving to ci-cache"

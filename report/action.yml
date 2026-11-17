@@ -1,0 +1,31 @@
+name: ci-cache report
+description: >-
+  Writes a ci-cache table to the job summary: the session's tier and branch, sccache hits
+  and misses, Turbo tasks from cache, and the sandbox vs CI fingerprint comparison. Put it
+  last in the job with `if: always()` and `continue-on-error: true`. It never fails the job.
+
+inputs:
+  tier:
+    description: The session's tier (default what the setup action recorded in this job).
+    required: false
+    default: ""
+  branch:
+    description: The session's branch (default what the setup action recorded in this job).
+    required: false
+    default: ""
+  working-directory:
+    description: >-
+      Where to look for Turbo run summaries (.turbo/runs/*.json). Default the setup action's
+      `workdir`, otherwise GITHUB_WORKSPACE.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        INPUT_TIER: ${{ inputs.tier }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: bash "$GITHUB_ACTION_PATH/report.sh"

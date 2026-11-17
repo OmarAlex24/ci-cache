@@ -65,33 +65,64 @@ repo_name=${GITHUB_REPOSITORY#*/}
   echo "TURBO_TEAM=$repo_name"
   # On a 403 turbo turns off the remote cache for the whole run: main-ro uses it read-only.
   if [[ $tier == main-ro ]]; then echo "TURBO_CACHE=local:rw,remote:r"; fi
+  # Run summaries (.turbo/runs/*.json) for the report action, without changing the user's
+  # command (the same as --summarize). Not if the job already sets it.
+  if [[ ${INPUT_TURBO_SUMMARY:-true} == true && -z ${TURBO_RUN_SUMMARY:-} ]]; then echo "TURBO_RUN_SUMMARY=true"; fi
 } >>"$GITHUB_ENV"
 echo "ci-cache: session $tier (branch $branch) until $expires"
 
-# 3. Working directory: optionally the same path Boat sandboxes use.
-workdir=$GITHUB_WORKSPACE
-if [[ ${INPUT_MOUNT_WORKDIR:-false} == true ]]; then
-  workdir=/home/user/$repo_name
-  if mountpoint -q "$workdir" 2>/dev/null; then
-    echo "ci-cache: $workdir is already mounted"
-  else
-    sudo mkdir -p "$workdir"
-    if [[ -n $(sudo ls -A "$workdir") ]]; then fail "$workdir exists and is not empty"; fi
-    sudo mount --bind "$GITHUB_WORKSPACE" "$workdir"
-    echo "ci-cache: checkout mounted at $workdir"
-  fi
+# Is there Rust? (`sccache: auto` and `mount-workdir: auto`)
+# -print -quit instead of `| grep -q`: with pipefail, find's SIGPIPE would give a false negative.
+has_rust=false
+if [[ -n $(find "$GITHUB_WORKSPACE" -maxdepth 3 -name Cargo.toml -not -path '*/node_modules/*' -not -path '*/target/*' -print -quit) ]]; then
+  has_rust=true
 fi
+
+# 3. Working directory: the same path Boat sandboxes use (/home/user/<repo>), so that
+#    sccache keys (which include the path) match.
+#    true: mount or fail.  auto (default): mount when there is a Cargo.toml, on Linux, with
+#    passwordless sudo; otherwise, or if mounting fails, build in GITHUB_WORKSPACE.
+workdir=$GITHUB_WORKSPACE
+target=/home/user/$repo_name
+mount_workdir() { # <strict: true|false>
+  local strict=$1
+  skip() {
+    if $strict; then fail "$*"; fi
+    echo "ci-cache: mount-workdir auto: $*; building in $GITHUB_WORKSPACE"
+  }
+  if mountpoint -q "$target" 2>/dev/null; then
+    echo "ci-cache: $target is already mounted"
+    workdir=$target
+    return 0
+  fi
+  local sudo=(sudo)
+  if ! $strict; then sudo=(sudo -n); fi
+  "${sudo[@]}" mkdir -p "$target" || { skip "could not create $target"; return 0; }
+  if [[ -n $("${sudo[@]}" ls -A "$target") ]]; then skip "$target exists and is not empty"; return 0; fi
+  "${sudo[@]}" mount --bind "$GITHUB_WORKSPACE" "$target" || { skip "mount --bind failed"; return 0; }
+  echo "ci-cache: checkout mounted at $target"
+  workdir=$target
+}
+case ${INPUT_MOUNT_WORKDIR:-auto} in
+  true) mount_workdir true ;;
+  auto)
+    if ! $has_rust; then
+      echo "ci-cache: mount-workdir auto: no Cargo.toml, building in $GITHUB_WORKSPACE"
+    elif [[ $(uname -s) != Linux ]]; then
+      echo "ci-cache: mount-workdir auto: not Linux, building in $GITHUB_WORKSPACE"
+    elif ! sudo -n true 2>/dev/null; then
+      echo "ci-cache: mount-workdir auto: no passwordless sudo, building in $GITHUB_WORKSPACE"
+    else
+      mount_workdir false
+    fi
+    ;;
+  false) ;;
+  *) echo "::warning title=ci-cache::mount-workdir must be auto, true or false; not mounting" ;;
+esac
 
 # 4. sccache if there is Rust.
 want_sccache=${INPUT_SCCACHE:-auto}
-if [[ $want_sccache == auto ]]; then
-  # -print -quit instead of `| grep -q`: with pipefail, find's SIGPIPE would give a false negative.
-  if [[ -n $(find "$GITHUB_WORKSPACE" -maxdepth 3 -name Cargo.toml -not -path '*/node_modules/*' -not -path '*/target/*' -print -quit) ]]; then
-    want_sccache=true
-  else
-    want_sccache=false
-  fi
-fi
+if [[ $want_sccache == auto ]]; then want_sccache=$has_rust; fi
 if [[ $want_sccache == true ]]; then
   version=${INPUT_SCCACHE_VERSION:-$DEFAULT_SCCACHE_VERSION}
   [[ $(uname -s) == Linux ]] || fail "installing sccache is only supported on Linux"
@@ -146,3 +177,9 @@ fi
   echo "expires-at=$expires"
   echo "workdir=$workdir"
 } >>"$GITHUB_OUTPUT"
+
+# For the report action (report/): what this session was, and since when (the file's
+# mtime marks which turbo run summaries belong to this job). Internal, not a contract.
+if [[ -n ${RUNNER_TEMP:-} ]] && mkdir -p "$RUNNER_TEMP/ci-cache" 2>/dev/null; then
+  printf 'tier=%s\nbranch=%s\nworkdir=%s\n' "$tier" "$branch" "$workdir" >"$RUNNER_TEMP/ci-cache/session"
+fi

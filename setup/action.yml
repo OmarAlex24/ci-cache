@@ -28,10 +28,20 @@ inputs:
     default: ""
   mount-workdir:
     description: >-
-      true to mount the checkout at /home/user/<repo> (sudo mount --bind), the same path
-      Boat sandboxes use, so that sccache keys match.
+      Mount the checkout at /home/user/<repo> (sudo mount --bind), the same path Boat
+      sandboxes use, so that sccache keys match; build in the `workdir` output.
+      auto (default): mount when there is a Cargo.toml, on Linux with passwordless sudo,
+      otherwise (or if mounting fails) skip it with a log line. true: mount or fail.
+      false: never.
     required: false
-    default: "false"
+    default: auto
+  turbo-summary:
+    description: >-
+      true to export TURBO_RUN_SUMMARY=true (turbo writes .turbo/runs/*.json, like
+      --summarize) so the report action can count Turbo cache hits. Not exported if the
+      job already sets TURBO_RUN_SUMMARY.
+    required: false
+    default: "true"
   fingerprint:
     description: true to print the cache fingerprint (scripts/cache-fingerprint.sh).
     required: false
@@ -55,7 +65,7 @@ outputs:
     description: Expiry of the session token (ISO 8601).
     value: ${{ steps.session.outputs.expires-at }}
   workdir:
-    description: Directory to build in (/home/user/<repo> with mount-workdir, otherwise GITHUB_WORKSPACE).
+    description: Directory to build in (/home/user/<repo> when mounted, otherwise GITHUB_WORKSPACE).
     value: ${{ steps.session.outputs.workdir }}
   fingerprint-compare:
     description: >-
@@ -75,6 +85,7 @@ runs:
         INPUT_SCCACHE_VERSION: ${{ inputs.sccache-version }}
         INPUT_SCCACHE_SHA256: ${{ inputs.sccache-sha256 }}
         INPUT_MOUNT_WORKDIR: ${{ inputs.mount-workdir }}
+        INPUT_TURBO_SUMMARY: ${{ inputs.turbo-summary }}
       run: bash "$GITHUB_ACTION_PATH/setup.sh"
 
     - if: inputs.fingerprint == 'true'
