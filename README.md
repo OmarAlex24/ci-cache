@@ -687,5 +687,5 @@ MIT, © 2023 Adishwar Rishi.
 
 ## License
 
-ci-cache is distributed under the GNU Affero General Public License v3.0, that version only
-(`AGPL-3.0-only`). The full text is in [`LICENSE`](LICENSE).
+ci-cache is distributed under the Apache License, Version 2.0 (`Apache-2.0`). The full text
+is in [`LICENSE`](LICENSE). `src/turbo/spec.ts` keeps its MIT notice ([Attribution](#attribution)).
