@@ -60,6 +60,29 @@ R2 enabled and a workers.dev subdomain: new to Cloudflare? Read
    report step's table in the job summary shows the sccache hit rate and the Turbo tasks
    from cache. The first `main` run after onboarding is cold; judge from the second.
 
+## What to expect
+
+From the first rollout ([case study](skill/ci-cache/references/case-study.md)): a Rust
+workspace of 12 crates plus a browser extension and two Docker images, in one GitHub
+Actions job on 8 vCPU. Only what the cache caused:
+
+| | Result |
+| --- | --- |
+| First run after onboarding (cold: it fills `main/`) | 16 min 27 s, 1 sccache hit and 1,853 misses: slower than before, once |
+| A warm run (sccache from `main/`, no `target/` restored) | 98 % sccache hits; the job took ~8 min |
+| `main`, warm | 99.84 % Rust hits |
+| A PR's CI after the agent built the branch in its sandbox | reused 96 % of the sandbox's objects (1,302 of 1,355) |
+
+The same rollout also cut its `docker` task from 406–485 s to 23 s, but that came from
+BuildKit's `type=gha` cache, not from ci-cache. And the job's median went from 12.4 min to
+~10 min with other changes in between (nextest, the Docker cache), so not all of it is the
+cache.
+
+To measure your own repo: the report step puts each run's hit rates and time saved in the
+job summary, and `scripts/job-durations.sh --compare <date or commit>` prints the median
+first-attempt job duration before and after you enabled ci-cache, as a markdown table
+([Measuring the gain](#measuring-the-gain)).
+
 ## Add sandboxes (optional)
 
 Once CI hits, an agent's sandbox can share its branch's tier, so the agent's build warms its
@@ -685,9 +708,16 @@ It writes one table to the job summary (`$GITHUB_STEP_SUMMARY`):
 | Row | Source |
 | --- | --- |
 | Session | the tier and branch the setup action got (inputs `tier`/`branch` override them) |
-| sccache | hits, misses and hit rate from `sccache --show-stats --stats-format json`, if sccache is on `PATH` |
-| Turbo | tasks from cache vs executed (and how many from the remote cache), from the `.turbo/runs/*.json` this job wrote; the setup action exports `TURBO_RUN_SUMMARY=true` so no `--summarize` is needed |
+| sccache | hits, misses and hit rate from `sccache --show-stats --stats-format json`, if sccache is on `PATH`, and an **estimate** of the compile time the hits saved (below) |
+| Turbo | tasks from cache vs executed (and how many from the remote cache), and the task time saved: the sum of each task's `timeSaved` in the `.turbo/runs/*.json` this job wrote (how long the cached task took when it ran). The setup action exports `TURBO_RUN_SUMMARY=true` so no `--summarize` is needed |
 | Fingerprint vs sandbox | the result of the setup action's comparison (`match`, the number of key lines that differ, no sandbox fingerprint, or skipped) |
+
+The sccache estimate is hits × (this job's total compile time ÷ its compilations), minus the
+time spent reading the hits, all from sccache's own counters. It assumes a hit would have
+compiled as long as the job's average compilation, so it only appears with at least 10
+compilations to average, and it is compile time summed over crates, not wall-clock: cargo
+compiles crates in parallel. Both time-saved numbers are task or compile time, not minutes
+off the job; the job's duration is what `scripts/job-durations.sh` measures.
 
 It never fails the job and never prints sccache's cache location (it holds the Worker URL).
 Composite actions have no post steps, which is why it is a separate action. sccache stats
@@ -718,6 +748,27 @@ longer.
 
 For sccache to hit between sandbox and CI, both must build at the same path
 (`/home/user/<repo>`), with the same toolchain and the same flags.
+
+## Measuring the gain
+
+`scripts/job-durations.sh` reads first-attempt job durations from the jobs API (a rerun skips
+work and lands on a warm machine, so it is not comparable). With `--compare` it splits the
+runs at the date, or the commit, where you enabled ci-cache:
+
+```sh
+bash scripts/job-durations.sh <owner/repo> --workflow ci.yml --job build --compare <YYYY-MM-DD|commit>
+```
+
+```
+| Job | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| `build` | 12.3 min (n=20, 11.7 min–14.1 min) | 8.3 min (n=20, 8.0 min–9.9 min) | -32 % |
+```
+
+It is read-only, makes one API call per run (`--limit` per side, default 20) and refuses to
+start when the hour's GitHub quota can't cover it. Fewer than 5 runs on a side get a `*`:
+no verdict yet. Skip the cold first run on `main`, and compare like with like (the same
+event, runner type and branch filter).
 
 ## Adding support for your stack
 
@@ -792,7 +843,8 @@ pnpm lint:sh                        # shellcheck of the client scripts
   fingerprint with `ci-cache-env.sh` and runs the action's comparison step against it
   (different `RUSTFLAGS` → one warning; same values → none). `pnpm e2e:report` runs the
   report action's script on fixtures taken from real turbo and sccache output, and on a
-  real turbo run with `TURBO_RUN_SUMMARY=true`.
+  real turbo run with `TURBO_RUN_SUMMARY=true`. `pnpm e2e:durations` runs
+  `scripts/job-durations.sh` against a fake `gh` (and checks the skill's copy is identical).
 - `pnpm e2e:bootstrap` runs `scripts/bootstrap.sh` against a fake `wrangler` that records
   every call, and a local fake of the subdomain API (no Cloudflare account is touched): dry
   run (also from a copy with no wrangler at all), a first run, an idempotent rerun,

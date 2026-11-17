@@ -108,9 +108,11 @@ with "no OIDC token".
 
 **Report action** (`OmarAlex24/ci-cache/report@<sha>`): last step of the job,
 with `if: always()` and `continue-on-error: true`. It writes a table to the
-job summary: tier and branch, sccache hits/misses and hit rate, Turbo tasks
-from cache (from `.turbo/runs/*.json`, written thanks to `TURBO_RUN_SUMMARY`),
-and the fingerprint comparison. It never fails the job.
+job summary: tier and branch, sccache hits/misses and hit rate (plus an
+estimate of the compile time saved, with 10 or more compilations to average),
+Turbo tasks from cache and their task time saved (from `.turbo/runs/*.json`,
+written thanks to `TURBO_RUN_SUMMARY`), and the fingerprint comparison. It
+never fails the job.
 
 **Exported to `$GITHUB_ENV`**
 

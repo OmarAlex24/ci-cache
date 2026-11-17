@@ -25,7 +25,7 @@ getting that parity and proving it with numbers.
 | `scripts/connect-sandbox.sh` | Wire a repo's Boat environment: both variables from stdin, `ci-cache-env.sh`, `cache-fingerprint.sh` and the sccache installer as secret files, `boat env upgrade`. Names only, `--dry-run`. |
 | `scripts/fingerprint-diff.sh` | Diff two cache fingerprints by hand; flags the lines that break keys. The setup action already does this on every branch-tier job. |
 | `scripts/cache-stats.sh` | Read `/v1/stats` and `/v1/stats/branches` (sandbox→CI reuse per branch). |
-| `scripts/job-durations.sh` | First-attempt job durations from the jobs API, with the median. |
+| `scripts/job-durations.sh` | First-attempt job durations from the jobs API, with the median; `--compare <date or commit>` prints a before/after markdown table. Identical copy of the engine's. |
 | `scripts/machine-class.sh` | iowait and steal of a run from boated-ci's machine samples: classifies the run as `fast` or `slow-io`. |
 | `templates/cached-job.yml` | One job wired for Rust + Turbo + Docker (actionlint-clean). Start from it. |
 | `templates/sandbox-install-sccache.sh` | Installs CI's sccache (0.19.0, SHA-256 checked) in a sandbox; `connect-sandbox.sh` delivers it. |
@@ -214,8 +214,9 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
   log.)
 - Check the bind mount with `stat -c '%d:%i'` (`mount-workdir: auto` logs
   why it skipped the mount, if it did).
-- Read the report's table in the job summary: sccache hit rate, Turbo tasks
-  from cache, fingerprint result.
+- Read the report's table in the job summary: sccache hit rate and the
+  estimated compile time saved, Turbo tasks from cache and their time saved,
+  fingerprint result.
 - Read `scripts/cache-stats.sh <owner/repo>`: per branch,
   `ciHitsOnSandboxObjects / sandboxWrites`.
 
@@ -225,7 +226,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 1. The first `main` run after onboarding is cold, and it fills `main/`.
    Don't judge on it.
 2. Compare job durations with `scripts/job-durations.sh`: first attempts
-   only, 5 or more runs per variant.
+   only, 5 or more runs per variant. `--compare <commit>` (the onboarding
+   commit) gives the before/after table to paste in the PR.
 3. Classify each run's Boat machine with `scripts/machine-class.sh`, and
    compare only within a class.
 

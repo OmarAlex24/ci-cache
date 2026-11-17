@@ -49,7 +49,9 @@ monorepo):
     action runs on its own on every branch-tier job).
   - `cache-stats.sh`: `/v1/stats` and `/v1/stats/branches`, with the
     sandbox→CI reuse ratio per branch.
-  - `job-durations.sh`: first-attempt job durations and the median.
+  - `job-durations.sh`: first-attempt job durations and the median, and a
+    before/after markdown table with `--compare <date or commit>` (an
+    identical copy of the engine's `scripts/job-durations.sh`).
   - `machine-class.sh`: iowait and steal per run from boated-ci's machine
     samples (fast vs slow-io machines).
 - **Templates**: `templates/cached-job.yml`, one actionlint-clean job wired
