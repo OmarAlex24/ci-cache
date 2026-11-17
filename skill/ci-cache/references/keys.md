@@ -60,6 +60,13 @@ bash <skill-dir>/scripts/mint-sandbox-key.sh <owner>/<repo> [label]
   (the engine checkout; by default the clone the skill lives in, otherwise
   required) set the paths. Test it with a temporary
   `CI_CACHE_KEYS_DIR`.
+- `--branches 'agent/*,fix/**'` binds the key to branch patterns (`*`
+  within one path segment, `**` across `/`): the Worker answers 403 to a
+  session for any other branch, so a leaked key or a confused agent can't
+  write into another PR's tier. Without it, any branch of the repo. To
+  change a key's patterns, mint it again with `--rotate`, or edit the
+  `branches` field of its entry in `sandbox_keys.json` (no key is printed),
+  then upload the map.
 - It prints the variable name, the repo's labels, the number of entries in
   the map and the two next commands. It never prints the key or the hash.
   `pnpm e2e:mint` (in the engine) tests all of this in a temporary directory.

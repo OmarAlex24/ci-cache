@@ -23,7 +23,7 @@ logs).
 | Endpoint | Credential | What it does |
 | --- | --- | --- |
 | `GET /health` | none | liveness check |
-| `POST /v1/session` | GitHub OIDC (audience `ci-cache`) or `sk_…` with `{"branch": "<name>"}` | issues the session token (6 h): `token`, `expiresAt`, `repoId`, `repo`, `tier`, `branch`, `kind` |
+| `POST /v1/session` | GitHub OIDC (audience `ci-cache`) or `sk_…` with `{"branch": "<name>"}` | issues the session token (6 h): `token`, `expiresAt`, `repoId`, `repo`, `tier`, `branch`, `kind`; 403 for a key bound to `branches` patterns the branch doesn't match |
 | `GET /v8/artifacts/status` | session | `{"status":"enabled"}` |
 | `GET`/`HEAD`/`PUT /v8/artifacts/{hash}` | session | Turbo artifacts |
 | `POST /v8/artifacts` | session | batch lookup (up to 1000 hashes) |
@@ -165,7 +165,7 @@ the token, and refuses to upload a fingerprint that contains either.
 | Secret | Content |
 | --- | --- |
 | `SESSION_SECRET` | HMAC key for session tokens |
-| `SANDBOX_KEYS` | JSON `{"<sha256 of sk_ key>": {"repoId", "repo", "label"}}`: **every** repo's entries |
+| `SANDBOX_KEYS` | JSON `{"<sha256 of sk_ key>": {"repoId", "repo", "label", "branches"?}}`: **every** repo's entries (`branches`: optional patterns, `keys.md`) |
 | `STATS_KEYS` | JSON `{"<sha256 of rk_ key>": {"label", "repoIds"?}}` |
 | `CF_ACCOUNT_ID`, `CF_API_TOKEN` | Analytics Engine SQL API |
 

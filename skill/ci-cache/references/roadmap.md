@@ -46,7 +46,3 @@ binary when the same binary has already passed. The design:
   rustc nor cargo, so it could do the same rename before the agent's first
   build. Not tried yet: check that the sandbox user can write the image's
   toolchains directory.
-- **Sandbox tokens bound to one branch**: today a sandbox key can request a
-  session for any branch name of its repo. Binding the key, or the Boat
-  sandbox, to one branch would stop a sandbox from writing into another
-  PR's tier.
