@@ -8,14 +8,19 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 
 ## Deploy your own instance
 
-1. `pnpm install && pnpm wrangler login` (or `CLOUDFLARE_API_TOKEN`).
-2. `bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> --dry-run`: read the
-   commands, then run it without `--dry-run`. Add `--location weur|enam|wnam|apac|…` (next to
-   whoever compiles; only for a new bucket) and `--with-stats` with `CF_ACCOUNT_ID` and
-   `CF_API_TOKEN` in the environment if you want `/v1/stats`. Note the Worker name it prints:
-   reruns take `--name <it>`.
-3. Save the printed URL as the GitHub Actions **secret** `CI_CACHE_URL` (repo or org), and as
-   `CI_CACHE_URL` in the sandboxes' environment. Done.
+0. A Cloudflare account with R2 enabled (dashboard, once; it needs a payment method on file)
+   and a workers.dev subdomain, or a zone for `--domain`: README "Before you start:
+   Cloudflare". `bootstrap.sh` checks both before changing anything and says what's missing.
+1. `pnpm install && pnpm wrangler login` (or `CLOUDFLARE_API_TOKEN`; with several accounts,
+   `CLOUDFLARE_ACCOUNT_ID`).
+2. `bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> --dry-run` (needs no wrangler
+   and no login): read the commands, then run it without `--dry-run`. Add
+   `--location weur|enam|wnam|apac|…` (next to whoever compiles; only for a new bucket),
+   `--domain <host>` to serve it on your own hostname instead of workers.dev, and
+   `--with-stats` with `CF_ACCOUNT_ID` and `CF_API_TOKEN` in the environment if you want
+   `/v1/stats`. Note the Worker name it prints: reruns take `--name <it>`.
+3. Save the printed URL as the GitHub Actions **secret** `CI_CACHE_URL` (repo or org) and,
+   if you use sandboxes, as `CI_CACHE_URL` in their environment. Done.
 
 ## Connect a repo
 
