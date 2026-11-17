@@ -1,5 +1,5 @@
 import { branchKey } from "../crypto.ts";
-import type { SessionClaims } from "../session/token.ts";
+import type { SessionClaims, SessionKind } from "../session/token.ts";
 import { untimed, type Timer } from "../timing.ts";
 
 /** Protocols that share the `<tier>/<repoId>[/<branchKey>]/<protocol>/...` layout. */
@@ -41,6 +41,54 @@ export async function tierLayout(session: SessionClaims, protocol: Protocol): Pr
       return { write: own, read: [{ prefix: own, source: "own" }, { prefix: main, source: "main" }] };
     }
   }
+}
+
+/**
+ * Cache fingerprints (`scripts/cache-fingerprint.sh` output) live under the session's own
+ * tier prefix, so the two lifecycle rules (`ramas-7d`, `main-30d`) cover them too:
+ *   ramas/<repoId>/<branchKey>/fingerprint/<kind>   (kind = sandbox | ci)
+ *   main/<repoId>/fingerprint/ci
+ * Not a `Protocol`: fingerprints are not cache objects and never reach the metrics.
+ */
+export interface FingerprintLocation {
+  key: string;
+  kind: SessionKind;
+  source: ReadSource;
+}
+
+async function branchFingerprintKey(session: SessionClaims, kind: SessionKind): Promise<string> {
+  return `ramas/${session.repoId}/${await branchKey(session.branch)}/fingerprint/${kind}`;
+}
+
+const mainFingerprintKey = (repoId: number) => `main/${repoId}/fingerprint/ci`;
+
+/** Where the session writes its own fingerprint; null on main-ro (read-only). */
+export async function ownFingerprintKey(session: SessionClaims): Promise<string | null> {
+  switch (session.tier) {
+    case "main":
+      return mainFingerprintKey(session.repoId);
+    case "main-ro":
+      return null;
+    case "rama":
+      return branchFingerprintKey(session, session.kind);
+  }
+}
+
+/**
+ * The fingerprint a session compares itself against, in order:
+ * - branch-tier CI: the sandbox fingerprint of its own branch;
+ * - sandbox: the CI fingerprint of its branch, then main's CI fingerprint;
+ * - main and main-ro: none (nothing writes a counterpart there).
+ */
+export async function counterpartFingerprints(session: SessionClaims): Promise<FingerprintLocation[]> {
+  if (session.tier !== "rama") return [];
+  if (session.kind === "ci") {
+    return [{ key: await branchFingerprintKey(session, "sandbox"), kind: "sandbox", source: "own" }];
+  }
+  return [
+    { key: await branchFingerprintKey(session, "ci"), kind: "ci", source: "own" },
+    { key: mainFingerprintKey(session.repoId), kind: "ci", source: "main" },
+  ];
 }
 
 export type ReadResult = "hit" | "hit-main" | "miss";

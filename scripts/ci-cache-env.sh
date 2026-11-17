@@ -10,6 +10,13 @@
 # Optional variables:
 #   CI_CACHE_BRANCH    branch to use (if HEAD is detached or you want another one)
 #   CI_CACHE_ENV_FILE  where to write the exports (default ~/.ci-cache.env)
+#   CI_CACHE_FINGERPRINT=false  don't upload the cache fingerprint (see below)
+#   CI_CACHE_FINGERPRINT_SCRIPT path to cache-fingerprint.sh (default: next to this script)
+#
+# After the session it runs cache-fingerprint.sh in the checkout, with the exports loaded,
+# and uploads it (PUT /v1/fingerprint) so the branch's CI can compare it with its own and
+# warn about the exact line that makes the cache miss. A failed upload is a warning: the
+# exports are already written and the script still succeeds.
 #
 # A sandbox key always gets the branch tier (`rama`): what is written here never reaches main/.
 # Never prints the key or the token.
@@ -18,6 +25,10 @@ set -euo pipefail
 fail() {
   echo "ci-cache: $*" >&2
   exit 1
+}
+
+warn() {
+  echo "ci-cache: warning: $*" >&2
 }
 
 # Text field of a flat JSON object. jq if available; otherwise sed (the Worker's response
@@ -50,7 +61,8 @@ fi
 body="{\"branch\":\"${branch//\"/\\\"}\"}"
 
 tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
+fp=$(mktemp)
+trap 'rm -f "$tmp" "$fp"' EXIT
 # The key goes through stdin (-H @-) so it doesn't show up in the process list.
 status=$(printf 'Authorization: Bearer %s\n' "$key" | curl -sS --retry 3 -X POST \
   -H @- -H 'content-type: application/json' --data "$body" \
@@ -83,6 +95,36 @@ chmod 600 "$env_file"
 # The sccache server keeps the environment it started with: restart it so it picks up
 # the new token on the next build.
 if command -v sccache >/dev/null 2>&1; then sccache --stop-server >/dev/null 2>&1 || true; fi
+
+# Best effort from here on: the session and the exports are done.
+upload_fingerprint() {
+  local script=${CI_CACHE_FINGERPRINT_SCRIPT:-$(dirname "${BASH_SOURCE[0]}")/cache-fingerprint.sh}
+  if [[ ! -r $script ]]; then
+    warn "$script not found: cache fingerprint not uploaded (CI can't compare it)"
+    return 0
+  fi
+  # The environment the build sees: the exports loaded, from the checkout.
+  # shellcheck source=/dev/null
+  if ! (set -a && . "$env_file" && set +a && cd "$dir" && bash "$script") >"$fp" 2>/dev/null || [[ ! -s $fp ]]; then
+    warn "cache-fingerprint.sh failed: cache fingerprint not uploaded"
+    return 0
+  fi
+  # cache-fingerprint.sh already drops secrets; this guard makes sure neither credential leaves.
+  if grep -qF -- "$token" "$fp" || grep -qF -- "$key" "$fp"; then
+    warn "the fingerprint contained a credential: not uploaded"
+    return 0
+  fi
+  local code
+  code=$(printf 'Authorization: Bearer %s\n' "$token" | curl -sS --retry 2 -X PUT \
+    -H @- -H 'content-type: text/plain; charset=utf-8' --data-binary "@$fp" \
+    -o /dev/null -w '%{http_code}' "$url/v1/fingerprint" 2>/dev/null) || code=000
+  if [[ $code == 204 ]]; then
+    echo "ci-cache: cache fingerprint uploaded (the branch's CI compares it with its own)"
+  else
+    warn "uploading the cache fingerprint answered $code: CI won't compare it"
+  fi
+}
+if [[ ${CI_CACHE_FINGERPRINT:-true} != false ]]; then upload_fingerprint || warn "fingerprint upload failed"; fi
 
 echo "ci-cache: $tier session for branch '$branch' ($repo) until $expires"
 echo "ci-cache: exports in $env_file — load them with: source $env_file"

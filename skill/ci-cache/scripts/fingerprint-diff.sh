@@ -12,10 +12,13 @@
 #           check  may change another stack's cache (node, turbo, go, docker, os...)
 #           info   harmless (vCPU, RAM, kernel, SCCACHE_*/TURBO_* plumbing)
 # Lines whose name looks like a secret are never printed; sk_/rk_ values are redacted.
+# FP_FORMAT=tsv prints one `class<TAB>item<TAB>left<TAB>right` line per difference instead
+# of the table (for scripts: setup/fingerprint-compare.sh).
 # Exit: 0 no KEY differences, 1 at least one, 2 usage or input error.
+# The skill ships an identical copy (skill/ci-cache/scripts/); `pnpm lint:sh` checks both match.
 set -euo pipefail
 
-[[ $# -eq 2 ]] || { sed -n '2,15s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+[[ $# -eq 2 ]] || { sed -n '2,19s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 for f in "$1" "$2"; do [[ -r $f ]] || { echo "cannot read $f" >&2; exit 2; }; done
 
 # Raw fingerprint lines from a fingerprint file or a `gh run view --log` file.
@@ -86,6 +89,12 @@ out=$(
   done
 )
 
+if [[ ${FP_FORMAT:-} == tsv ]]; then
+  [[ -z $out ]] && exit 0
+  printf '%s\n' "$out" | sort -t$'\t' -k1,1 -k2,2
+  if printf '%s\n' "$out" | grep -q '^KEY'$'\t'; then exit 1; fi
+  exit 0
+fi
 if [[ -z $out ]]; then
   echo "fingerprints match: nothing in them should make the cache miss"
   exit 0

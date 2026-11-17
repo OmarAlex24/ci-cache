@@ -5,6 +5,7 @@ import type { JWTVerifyGetKey } from "jose";
 import { davRoutes } from "./dav/routes.ts";
 import type { Env } from "./env.ts";
 import { HttpError, jsonError } from "./errors.ts";
+import { fingerprintRoutes } from "./fingerprint/routes.ts";
 import { limiterFromEnv, limiterMiddleware, type LimiterFactory } from "./ratelimit.ts";
 import { sessionRoutes } from "./session/routes.ts";
 import { analyticsFromEnv, type AnalyticsClient } from "./stats/analytics.ts";
@@ -34,6 +35,7 @@ export function createApp(deps: AppDeps) {
   app.route("/", sessionRoutes(deps));
   app.route("/", turboRoutes());
   app.route("/", davRoutes());
+  app.route("/", fingerprintRoutes());
   app.route("/", statsRoutes({ analytics: deps.analytics ?? analyticsFromEnv }));
 
   app.notFound((c) => jsonError(c, 404, "not_found", "Route not found"));

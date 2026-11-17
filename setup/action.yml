@@ -36,6 +36,13 @@ inputs:
     description: true to print the cache fingerprint (scripts/cache-fingerprint.sh).
     required: false
     default: "true"
+  fingerprint-compare:
+    description: >-
+      true to upload this job's cache fingerprint and, on the branch tier, compare it with
+      the one the branch's sandbox uploaded (ci-cache-env.sh): every line that enters the
+      cache keys and differs becomes a warning and a row in the job summary. Never fails the job.
+    required: false
+    default: "true"
 
 outputs:
   tier:
@@ -50,6 +57,11 @@ outputs:
   workdir:
     description: Directory to build in (/home/user/<repo> with mount-workdir, otherwise GITHUB_WORKSPACE).
     value: ${{ steps.session.outputs.workdir }}
+  fingerprint-compare:
+    description: >-
+      Result of the sandbox vs CI fingerprint comparison: match, mismatch, none (no sandbox
+      fingerprint for the branch), skipped (not the branch tier, or no session) or error.
+    value: ${{ steps.compare.outputs.fingerprint-compare }}
 
 runs:
   using: composite
@@ -69,3 +81,13 @@ runs:
       shell: bash
       working-directory: ${{ steps.session.outputs.workdir }}
       run: bash "$GITHUB_ACTION_PATH/../scripts/cache-fingerprint.sh"
+
+    # After the session step: runs in the workdir (the mounted path) with its exports loaded.
+    - id: compare
+      if: inputs.fingerprint-compare == 'true' && steps.session.outputs.tier != ''
+      shell: bash
+      working-directory: ${{ steps.session.outputs.workdir }}
+      env:
+        INPUT_TIER: ${{ steps.session.outputs.tier }}
+        INPUT_BRANCH: ${{ steps.session.outputs.branch }}
+      run: bash "$GITHUB_ACTION_PATH/fingerprint-compare.sh"

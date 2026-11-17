@@ -35,6 +35,8 @@ tags:
     description: Turborepo Remote Cache API v8.
   - name: sccache
     description: Minimal WebDAV for sccache's webdav backend.
+  - name: fingerprint
+    description: Cache fingerprints, so a branch's CI can compare its cache keys with its sandbox's.
   - name: metrics
     description: Usage metrics from Workers Analytics Engine, with a read-only key.
 
@@ -331,6 +333,74 @@ paths:
               schema: { $ref: "#/components/schemas/Error" }
         "411": { description: "Missing Content-Length" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
+
+  /v1/fingerprint:
+    description: |
+      A cache fingerprint is the output of `scripts/cache-fingerprint.sh`: everything that
+      goes into the cache keys (checkout path, user, HOME, toolchains, RUSTFLAGS, CARGO_*…),
+      with secrets filtered out. The sandbox uploads its own after each session
+      (`ci-cache-env.sh`); the branch's CI downloads it and compares it with its own
+      (`setup/fingerprint-compare.sh`), warning about each line that makes the cache miss.
+
+      One object per tier, repository, branch and session kind, under the session's own
+      tier prefix (so the existing lifecycle rules expire it):
+      `ramas/<repoId>/<branchKey>/fingerprint/<sandbox|ci>` or `main/<repoId>/fingerprint/ci`.
+      The session decides everything: no request field picks the branch or the kind, and
+      there are no listings. Fingerprints are not counted in the metrics.
+    put:
+      tags: [fingerprint]
+      summary: Stores the session's own fingerprint
+      operationId: putFingerprint
+      security: [{ sessionToken: [] }]
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema: { type: string, maxLength: 65536 }
+      responses:
+        "204": { description: "Stored (replaces the previous one of the same kind and branch)" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "403":
+          description: Read-only token (main-ro)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: Larger than 64 KB (by the real body size, not only Content-Length)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [fingerprint]
+      summary: Returns the fingerprint to compare against
+      operationId: getFingerprint
+      description: |
+        - branch-tier CI (`rama`, kind `ci`): the sandbox fingerprint of its own branch;
+        - sandbox: the CI fingerprint of its branch, otherwise main's CI fingerprint;
+        - `main` and `main-ro`: none (404).
+      security: [{ sessionToken: [] }]
+      responses:
+        "200":
+          description: The counterpart fingerprint
+          headers:
+            X-Fingerprint-Kind:
+              description: Who wrote it.
+              schema: { type: string, enum: [sandbox, ci] }
+            X-Fingerprint-Source:
+              description: "`branch` (the session's branch) or `main`."
+              schema: { type: string, enum: [branch, main] }
+            Last-Modified:
+              schema: { type: string }
+            Cache-Control:
+              schema: { const: no-store }
+          content:
+            text/plain:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /v1/stats:
     get:
