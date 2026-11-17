@@ -24,7 +24,7 @@ environment.
       - name: ci-cache
         id: cache
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
+        uses: OmarAlex24/ci-cache/setup@v1   # or a full commit SHA
         with:
           url: ${{ secrets.CI_CACHE_URL }}      # a secret, not a variable: GitHub masks it in logs
           sccache: "false"          # a TS-only repo; omit to auto-detect Rust

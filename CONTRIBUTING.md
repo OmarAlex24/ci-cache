@@ -40,7 +40,7 @@ Mint the key with its own label: `mint-sandbox-key.sh <owner/repo> <provider>`.
 hook, the agent's instructions):
 
 ```sh
-ref=<full commit SHA of OmarAlex24/ci-cache>
+ref=v1.0.0   # a release tag (immutable) or a full commit SHA
 curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
   bash -s -- --ref "$ref" [--rust]
 ```
@@ -48,7 +48,7 @@ curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/i
 **Clone path.** Where the provider clones the repo (`<path>`), and the matching action input:
 
 ```yaml
-- uses: OmarAlex24/ci-cache/setup@<sha>
+- uses: OmarAlex24/ci-cache/setup@v1
   with:
     url: ${{ secrets.CI_CACHE_URL }}
     workdir-path: <path>        # omit if it is /home/user/<repo>

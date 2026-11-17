@@ -79,8 +79,8 @@ records who wrote it (`writer-kind`: `ci` or `sandbox`), and that is how
 
 ## The setup action (CI side)
 
-`OmarAlex24/ci-cache/setup@<sha>` (or `<your-fork>/ci-cache/setup@<sha>`).
-Pin a full commit SHA from the engine repo. It is a composite action that
+`OmarAlex24/ci-cache/setup@v1` (or `<your-fork>/ci-cache/setup@<sha>`).
+`@v1` follows v1.x fixes; pin a full commit SHA if you prefer. It is a composite action that
 runs `setup/setup.sh`, then `scripts/cache-fingerprint.sh`, then
 `setup/fingerprint-compare.sh` (in the `workdir`, with the session's
 exports). It masks the Worker URL and its host with `::add-mask::`.
@@ -106,7 +106,7 @@ with "no OIDC token".
 `fingerprint-compare` (`match`, `mismatch`, `none`, `skipped`, `error`).
 `workdir` is `/home/user/<repo>` with the mount, otherwise `GITHUB_WORKSPACE`.
 
-**Report action** (`OmarAlex24/ci-cache/report@<sha>`): last step of the job,
+**Report action** (`OmarAlex24/ci-cache/report@v1`): last step of the job,
 with `if: always()` and `continue-on-error: true`. It writes a table to the
 job summary: tier and branch, sccache hits/misses and hit rate (plus an
 estimate of the compile time saved, with 10 or more compilations to average),
