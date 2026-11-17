@@ -1,23 +1,39 @@
 # ci-cache
 
-A CI cache engine on Cloudflare R2: one Worker that stores the **Turbo** cache (Remote Cache
-API v8) and the **sccache** cache (WebDAV backend) per repository, with a `main/` tier that
-only CI on `main` writes and a per-branch tier that both the agent in its Boat sandbox and
-that branch's CI write.
+A remote build cache for GitHub Actions and for coding agents, on your own Cloudflare
+account. One Worker stores the **Turbo** cache (Remote Cache API v8) and the **sccache**
+cache (WebDAV backend, for Rust) per repository in R2. A `main/` tier is written only by CI
+on `main`; each branch has its own tier, written by that branch's CI and, optionally, by
+the sandbox an agent builds it in.
 
-The point: an agent's build in its sandbox warms its own PR's CI, and nothing an agent (or
-a PR) writes can ever reach `main/`. A pinned composite action wires GitHub Actions, and a
-shell script wires sandboxes.
+- **CI first.** A pinned composite action wires a job: PR runs reuse what `main` built,
+  and later runs of a branch reuse what its earlier runs built.
+- **Agents' sandboxes, if you use them.** An agent building in a sandbox (any machine that
+  can run a bash script with a key; [Boat](https://boat.dev) is the provider this repo is
+  tested with) warms its own PR's CI. Nothing an agent or a PR writes can reach `main/`.
+- **Yours.** It runs on your account, with your bucket and your keys. There is no
+  dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](openapi.yaml)
+  (OpenAPI 3.1), so any frontend can use it ([why](#why-there-is-no-dashboard)).
 
-No dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](openapi.yaml)
-(OpenAPI 3.1), so any frontend can use it ([why](#why-there-is-no-dashboard)).
+## Quickstart (CI only)
 
-## Quickstart
+Most adopters start here, and sandboxes can come later. You need a Cloudflare account with
+R2 enabled and a workers.dev subdomain: new to Cloudflare? Read
+[Before you start: Cloudflare](#before-you-start-cloudflare) first.
 
-1. **Deploy the Worker** (one R2 bucket, two lifecycle rules, a few secrets) with one
-   command: `bash scripts/bootstrap.sh --allowed-owners <your-user-or-org>`
-   ([Deploying](#deploying-with-wrangler)). Save the URL it prints as the GitHub Actions
-   **secret** `CI_CACHE_URL`.
+1. **Deploy the Worker** (one R2 bucket, two lifecycle rules, a few secrets) from a clone of
+   this repo, with node and pnpm:
+
+   ```sh
+   pnpm install && pnpm wrangler login
+   bash scripts/bootstrap.sh --allowed-owners <your-user-or-org> --dry-run   # read the plan
+   bash scripts/bootstrap.sh --allowed-owners <your-user-or-org> [--location weur]
+   ```
+
+   It checks the account first (R2 enabled, a workers.dev subdomain) and prints the Worker
+   name (pass `--name <it>` on reruns) and URL ([Deploying](#deploying-with-wrangler)).
+   Save the URL as the GitHub Actions **secret** `CI_CACHE_URL`:
+   `gh secret set CI_CACHE_URL --repo <owner/repo>`.
 2. **CI.** Give the job `id-token: write` and add the action early in the job:
 
    ```yaml
@@ -40,17 +56,102 @@ No dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](open
            continue-on-error: true
            uses: OmarAlex24/ci-cache/report@<sha>
    ```
-3. **Sandboxes** (optional). Mint a sandbox key, add its hash to `SANDBOX_KEYS`, put the
-   key in the sandbox as `CI_CACHE_SANDBOX_KEY`, then run
-   `bash scripts/ci-cache-env.sh && source ~/.ci-cache.env` before building:
-   [Boat sandbox](#boat-sandbox-scriptsci-cache-envsh).
-4. **Check it hits**: the report step's table in the job summary (sccache hit rate, Turbo
-   tasks from cache, the sandbox vs CI fingerprint check), any `ci-cache cache key
-   mismatch` warning, and `GET /v1/stats/branches` ([Metrics](#metrics)).
+3. **Check it hits.** The setup step logs `ci-cache: session <tier>`. Run the job twice: the
+   report step's table in the job summary shows the sccache hit rate and the Turbo tasks
+   from cache. The first `main` run after onboarding is cold; judge from the second.
+
+## Add sandboxes (optional)
+
+Once CI hits, an agent's sandbox can share its branch's tier, so the agent's build warms its
+PR's CI:
+
+1. Mint a sandbox key, add its hash to the `SANDBOX_KEYS` secret and put the key in the
+   sandbox as `CI_CACHE_SANDBOX_KEY`, next to `CI_CACHE_URL` ([Keys](#secrets-wrangler-secret-put)).
+2. Put `scripts/ci-cache-env.sh` and `scripts/cache-fingerprint.sh` side by side in the
+   sandbox (`~/.ci-cache/`), and before building run
+   `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env`
+   ([Sandboxes](#boat-sandbox-scriptsci-cache-envsh)).
+3. Check it: the PR's setup step compares the sandbox's cache fingerprint with CI's and
+   warns about every difference (`ci-cache cache key mismatch`), and
+   `GET /v1/stats/branches` shows how much of the sandbox's work CI reused ([Metrics](#metrics)).
 
 Agents working on this repo, or connecting another repo to it, start at
 [`AGENTS.md`](AGENTS.md). The [`skill/ci-cache`](skill/ci-cache) Claude Code skill automates
 onboarding a repo (audit, keys, CI and sandbox wiring, measurement).
+
+## Before you start: Cloudflare
+
+ci-cache runs on your Cloudflare account. With none yet, once per account:
+
+1. **Create an account** at [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up).
+   No domain is needed: the Worker gets a `workers.dev` URL.
+2. **Enable R2.** In the dashboard, *Storage & databases → R2 → Overview*, complete the
+   checkout that adds an R2 subscription ([R2: get started](https://developers.cloudflare.com/r2/get-started/)).
+   Adding a subscription needs a payment method on file
+   ([billing profile](https://developers.cloudflare.com/billing/get-started/create-billing-profile/)),
+   even if usage stays within R2's free tier. Until then every R2 call fails with
+   `code: 10042`, and `bootstrap.sh` stops and says so.
+3. **Register a workers.dev subdomain** (`<subdomain>.workers.dev`) under *Workers & Pages*
+   ([workers.dev](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)).
+   Without one, `wrangler deploy` stops (and wrangler run by an AI agent registers one on its
+   own, named after the project); `bootstrap.sh` checks first. Or skip it and serve the
+   Worker on your own domain ([Custom domain](#custom-domain-optional)).
+4. **Log wrangler in**: `pnpm wrangler login`, or `CLOUDFLARE_API_TOKEN`. With access to
+   several accounts, set `CLOUDFLARE_ACCOUNT_ID`.
+
+### Plans and limits that matter here
+
+R2 and the Workers plan are billed separately. Prices as published in November 2026; check
+the linked pages before relying on them.
+
+| | Workers Free | Workers Paid |
+| --- | --- | --- |
+| Price | $0 | $5/month minimum per account |
+| Worker requests | 100,000/day, reset at 00:00 UTC; past it, error 1027 | 10 million/month included, then $0.30/million |
+| CPU time per request | 10 ms | 30 s by default |
+
+Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/),
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/).
+
+| R2 (Standard storage) | Free each month | Beyond the free tier |
+| --- | --- | --- |
+| Storage | 10 GB-month | $0.015/GB-month |
+| Class A operations (writes: `PutObject`) | 1 million | $4.50/million |
+| Class B operations (reads: `GetObject`, `HeadObject`) | 10 million | $0.36/million |
+| Egress | free | free |
+
+Source: [R2 pricing](https://developers.cloudflare.com/r2/pricing/). `DeleteObject` is
+free; the page doesn't say how lifecycle expirations are counted.
+
+- **Request body: 100 MB** on the Free and Pro plans (the zone's plan, not the Workers
+  plan), which caps one cache object ([Limits](#limits)).
+- **Analytics Engine** (the `/v1/stats` metrics) is not billed at the moment; Workers Free
+  includes 100,000 data points written and 10,000 read queries a day
+  ([pricing](https://developers.cloudflare.com/analytics/analytics-engine/pricing/)).
+- The Worker's CPU work per request is a token check plus routing, and bodies stream to and
+  from R2. It should fit Workers Free's 10 ms, but that hasn't been measured; this repo's
+  instance runs on Workers Paid.
+
+### What it costs, roughly
+
+Each cache request (a GET or PUT of one object) is one Worker request. A write is one
+Class A operation. A read is one Class B operation on the `main` tier and two on a branch
+(its own prefix and `main/`, read concurrently). Lifecycle rules keep storage bounded:
+branches expire after 7 days and `main/` after 30.
+
+From the first rollout ([case study](skill/ci-cache/references/case-study.md)), a Rust
+workspace whose full build is ~1,850 sccache objects:
+
+| One full build | Worker requests | Class A | Class B |
+| --- | ---: | ---: | ---: |
+| Cold (everything misses and is written) | ~3,700 | ~1,850 | ≤ ~3,700 |
+| Warm (everything hits) | ~1,850 | 0 | ≤ ~3,700 |
+
+So Workers Free's 100,000 requests a day cover about 25 cold or 50 warm full builds of that
+workspace, and R2's free million Class A operations about 540 cold builds a month. Past the
+free tiers, a million writes cost $4.50 in R2, a million reads $0.36 to $0.72, and a million
+Worker requests $0.30 on Workers Paid. Measure your own numbers with `/v1/stats` and the R2
+metrics in the dashboard.
 
 ## Supported technologies
 
@@ -368,7 +469,7 @@ on `/v1/stats*`. Past the limit, those failures answer `429 {"code":"rate_limite
 What it does **not** do: every request, limited or not, is still a Worker invocation that
 you pay for. It stops brute force and expensive work (JWKS, SQL), not a flood. Real
 volumetric protection is a WAF rate-limiting rule on a custom domain in front of the
-Worker, plus not publishing the URL: keep it in the GitHub secret `CI_CACHE_URL` so it never
+Worker ([Custom domain](#custom-domain-optional)), plus not publishing the URL: keep it in the GitHub secret `CI_CACHE_URL` so it never
 appears in public run logs ([why](#with-scriptsbootstrapsh-recommended)), and give the
 Worker an unguessable name (`bootstrap.sh` does both).
 
@@ -394,19 +495,25 @@ the entry with its hash to merge into the secret. The Worker never stores plaint
 pnpm install
 pnpm wrangler login
 bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> --dry-run   # prints the commands
-bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> [--location weur] [--with-stats]
+bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> [--location weur] [--with-stats] [--domain <host>]
 ```
 
-It is non-interactive and idempotent (rerun it with the same `--name` to finish or repair an
+`--dry-run` runs nothing and needs no wrangler and no login. The real run is
+non-interactive and idempotent (rerun it with the same `--name` to finish or repair an
 instance):
 
+0. checks the account before changing anything: wrangler is logged in, R2 is enabled (else
+   it stops with how to enable it) and, without `--domain`, the account has a workers.dev
+   subdomain (`GET /accounts/<id>/workers/subdomain` with wrangler's own token, sent on
+   stdin; it skips this check when it can't tell, for example with several accounts and no
+   `CLOUDFLARE_ACCOUNT_ID`);
 1. creates the R2 bucket if missing (`--bucket`, default `ci-cache`; `--location` is a
    location hint and only applies to a new bucket) and the two lifecycle rules
    (`ramas-7d` on `ramas/`, `main-30d` on `main/`), skipping the ones that exist;
 2. deploys with `wrangler deploy --config <temporary copy> --name <name> --var
    ALLOWED_OWNERS:<owners>`. The temporary copy is `wrangler.jsonc` with `bucket_name` set to
-   `--bucket` (and `namespace_id` to `--rate-limit-namespace`, if given), written outside the
-   repo: `wrangler.jsonc` is never edited, so `pnpm run deploy` keeps working as before;
+   `--bucket` (and `namespace_id` to `--rate-limit-namespace`, and the custom domain of
+   `--domain`, if given), written outside the repo: `wrangler.jsonc` is never edited, so `pnpm run deploy` keeps working as before;
 3. sets `SESSION_SECRET` (`openssl rand -base64 48`, piped to `wrangler secret put`, never
    printed; kept if it already exists, since a new one would invalidate every session) and
    `SANDBOX_KEYS`/`STATS_KEYS` = `{}` if missing; with `--with-stats`, `CF_ACCOUNT_ID` and
@@ -464,10 +571,35 @@ worse: the body crosses the Atlantic and a 512 KB read went up to ~0.9 s.
 R2 rules expire by **upload date**, not last use: a heavily used `main/` artifact still
 disappears at 30 days, the next `main` CI misses it once and writes it again.
 
+### Custom domain (optional)
+
+By default the Worker answers at `https://<name>.<your-subdomain>.workers.dev`, which shows
+your account's subdomain. To serve it on a hostname of your own instead, in a zone that is
+active on Cloudflare in the same account:
+
+```sh
+bash scripts/bootstrap.sh --name <name> --allowed-owners <owner> --domain cache.example.com
+```
+
+The deploy config then gets `"routes": [{ "pattern": "cache.example.com", "custom_domain":
+true }]`, `"workers_dev": false` and `"preview_urls": false`: Cloudflare creates the DNS
+record and the certificate for the hostname, which must not already have a CNAME record
+([Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/)),
+and the workers.dev URL stops answering
+([workers.dev](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/)).
+Update `CI_CACHE_URL` everywhere to `https://cache.example.com`. Deploying by hand, put the
+same three keys in `wrangler.jsonc`.
+
+A custom domain is also where Cloudflare's WAF can sit in front of the Worker: a
+[rate limiting rule](https://developers.cloudflare.com/waf/rate-limiting-rules/) on the
+hostname throttles floods before they become Worker requests you pay for. The Free plan
+allows one rule, counted per IP over 10 s; paid plans allow more rules and longer periods.
+Remember that CI runners share IPs: keep the threshold well above what a busy CI run sends.
+
 ## Limits
 
 - **100 MB per request**: a Worker's body limit (Free and Pro plans; Business 200 MB,
-  Enterprise 500 MB). `MAX_ARTIFACT_BYTES` enforces it before touching R2 (413). A larger
+  Enterprise up to 5 GB; [limits](https://developers.cloudflare.com/workers/platform/limits/)). `MAX_ARTIFACT_BYTES` enforces it before touching R2 (413). A larger
   Turbo artifact isn't stored: turbo warns and goes on without the cache for that task.
 - `PUT` requires `Content-Length` (411 if missing): the body streams to R2 without being
   loaded into memory, and R2 needs to know the length.
@@ -662,9 +794,11 @@ pnpm lint:sh                        # shellcheck of the client scripts
   report action's script on fixtures taken from real turbo and sccache output, and on a
   real turbo run with `TURBO_RUN_SUMMARY=true`.
 - `pnpm e2e:bootstrap` runs `scripts/bootstrap.sh` against a fake `wrangler` that records
-  every call (no Cloudflare account is touched): dry run, a first run, an idempotent rerun,
-  `--with-stats` and validation, checking that no secret reaches argv or the output; then the
-  real wrangler bundles the generated config with `deploy --dry-run`, offline.
+  every call, and a local fake of the subdomain API (no Cloudflare account is touched): dry
+  run (also from a copy with no wrangler at all), a first run, an idempotent rerun,
+  `--with-stats`, the preflight (R2 not enabled, no workers.dev subdomain), `--domain` and
+  validation, checking that no secret or token reaches argv or the output; then the real
+  wrangler bundles the generated configs with `deploy --dry-run`, offline.
 - Analytics Engine can't be queried locally: the query sits behind the `AnalyticsClient`
   interface and the tests check the generated SQL and the shape of the responses.
 
