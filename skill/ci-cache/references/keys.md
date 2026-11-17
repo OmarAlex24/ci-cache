@@ -47,7 +47,7 @@ captures its output without printing it, merges the hash into
 `sandbox_keys.json` and appends the plaintext to `keys.env`:
 
 ```bash
-bash ~/.claude/skills/ci-cache/scripts/mint-sandbox-key.sh <owner>/<repo> [label]
+bash <skill-dir>/scripts/mint-sandbox-key.sh <owner>/<repo> [label]
 ```
 
 - It resolves the numeric repo id with `gh api repos/<repo> --jq .id`.

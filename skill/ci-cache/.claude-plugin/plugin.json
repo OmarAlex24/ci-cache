@@ -1,0 +1,11 @@
+{
+  "name": "ci-cache",
+  "description": "Onboard a repo onto a ci-cache engine: CI and sandbox wiring for sccache and Turbo, keys, parity checks and measurement",
+  "author": {
+    "name": "OmarAlex24"
+  },
+  "homepage": "https://github.com/OmarAlex24/ci-cache",
+  "repository": "https://github.com/OmarAlex24/ci-cache",
+  "license": "Apache-2.0",
+  "keywords": ["ci", "cache", "sccache", "turbo", "github-actions", "cloudflare"]
+}
