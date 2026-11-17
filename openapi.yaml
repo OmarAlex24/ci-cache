@@ -20,8 +20,8 @@ info:
     [turborepo-remote-cache-cloudflare](https://github.com/AdiRishi/turborepo-remote-cache-cloudflare)
     (MIT, © 2023 Adishwar Rishi).
   license:
-    name: MIT
-    identifier: MIT
+    name: Apache-2.0
+    identifier: Apache-2.0
 servers:
   - url: https://ci-cache.example.workers.dev
     description: Replace with the URL of your deployed Worker
