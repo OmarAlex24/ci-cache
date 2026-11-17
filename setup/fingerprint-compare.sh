@@ -110,18 +110,29 @@ if ((rc > 1)); then
   finish error
 fi
 
-keys=0
+# KEY lines are what sccache hashes. A job without RUSTC_WRAPPER doesn't use sccache (a
+# Turbo-only repo, or sccache off): they go to the "other differences" list, not to warnings.
+sccache_on=${RUSTC_WRAPPER:+yes}
+if [[ -z $sccache_on ]]; then
+  log "RUSTC_WRAPPER is not set in this job: sccache key differences are listed in the summary, not warned"
+fi
+
+keys=0 hidden=0
 key_rows="" other_rows=""
 seen=$'\n'
 while IFS=$'\t' read -r class item sandbox ci; do
   [[ -n ${class:-} ]] || continue
+  # Unset and empty give the same cache keys.
+  case "$sandbox/$ci" in "(missing)/(empty)" | "(empty)/(missing)") continue ;; esac
   label=${item#*|}
   # RUSTFLAGS (and a few more) appear in their section and among the variables: report once.
-  entry="$label"$'\t'"$sandbox"$'\t'"$ci"
-  [[ $seen != *$'\n'"$entry"$'\n'* ]] || continue
-  seen+="$entry"$'\n'
+  [[ $seen != *$'\n'"$label"$'\n'* ]] || continue
+  seen+="$label"$'\n'
   row="| $(md_cell "$label") | $(md_cell "$sandbox") | $(md_cell "$ci") |"$'\n'
-  if [[ $class == KEY ]]; then
+  if [[ $class == KEY && -z $sccache_on ]]; then
+    hidden=$((hidden + 1))
+    other_rows+=$row
+  elif [[ $class == KEY ]]; then
     keys=$((keys + 1))
     echo "::warning title=ci-cache cache key mismatch::$(command_data "$label: sandbox=${sandbox:0:200} ci=${ci:0:200}")"
     key_rows+=$row
@@ -132,7 +143,7 @@ done <<<"$diff"
 
 if ((keys > 0)); then
   log "$keys line(s) that enter the cache keys differ from the sandbox's: see the warnings"
-else
+elif ((hidden == 0)); then
   log "the sandbox and CI fingerprints match on every line that enters the cache keys"
 fi
 
@@ -146,6 +157,8 @@ if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
       echo "| Item | Sandbox | CI |"
       echo "| --- | --- | --- |"
       printf '%s' "$key_rows"
+    elif ((hidden > 0)); then
+      echo "sccache is off in this job (no RUSTC_WRAPPER), so the $hidden line(s) that would change its keys are listed below without warnings."
     else
       echo "The fingerprints match on every line that enters the cache keys."
     fi

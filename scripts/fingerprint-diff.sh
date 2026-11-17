@@ -91,7 +91,10 @@ out=$(
 
 if [[ ${FP_FORMAT:-} == tsv ]]; then
   [[ -z $out ]] && exit 0
-  printf '%s\n' "$out" | sort -t$'\t' -k1,1 -k2,2
+  # An empty value becomes `(empty)`: `read` with IFS=tab would merge two adjacent tabs
+  # and shift the columns.
+  printf '%s\n' "$out" | sort -t$'\t' -k1,1 -k2,2 |
+    awk 'BEGIN { FS = OFS = "\t" } { for (i = 3; i <= 4; i++) if ($i == "") $i = "(empty)"; print }'
   if printf '%s\n' "$out" | grep -q '^KEY'$'\t'; then exit 1; fi
   exit 0
 fi

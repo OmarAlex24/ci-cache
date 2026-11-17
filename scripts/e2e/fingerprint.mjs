@@ -45,7 +45,9 @@ async function sandbox(rustflags) {
 }
 
 /** The setup action's compare step, with the environment the session step leaves behind. */
-async function ci({ name, rustflags, exports, tier = "rama", branch = BRANCH, kind = "ci" }) {
+// `rustflags: undefined` leaves RUSTFLAGS unset (spawn drops undefined values). CI uses sccache
+// (RUSTC_WRAPPER) unless `wrapper` is null, whatever the host has installed.
+async function ci({ name, rustflags, exports, tier = "rama", branch = BRANCH, kind = "ci", wrapper = "sccache" }) {
   const dir = join(work, name);
   mkdirSync(dir);
   for (const f of ["summary", "output"]) writeFileSync(join(dir, f), "");
@@ -57,6 +59,7 @@ async function ci({ name, rustflags, exports, tier = "rama", branch = BRANCH, ki
     TURBO_TOKEN: token,
     SCCACHE_WEBDAV_TOKEN: token,
     RUSTFLAGS: rustflags,
+    RUSTC_WRAPPER: wrapper ?? undefined,
     INPUT_TIER: tier,
     INPUT_BRANCH: branch,
     GITHUB_STEP_SUMMARY: join(dir, "summary"),
@@ -152,6 +155,35 @@ try {
     cwd: checkout,
   });
   check(off.code === 0 && !/fingerprint (uploaded|not uploaded)/.test(off.stdout + off.stderr), "CI_CACHE_FINGERPRINT=false skips it");
+
+  console.log("8. RUSTFLAGS set on one side only");
+  r = await ci({ name: "ci-unset", rustflags: undefined, exports: sb.exports });
+  check(
+    r.warnings.length === 1 && r.warnings[0] === "::warning title=ci-cache cache key mismatch::RUSTFLAGS: sandbox=-D warnings ci=(missing)",
+    `one warning, sandbox=-D warnings ci=(missing) (got ${JSON.stringify(r.warnings)})`,
+  );
+  let sb2 = await sandbox(undefined);
+  check(sb2.out.includes("cache fingerprint uploaded"), "a sandbox without RUSTFLAGS uploads its fingerprint");
+  r = await ci({ name: "sandbox-unset", rustflags: "-D warnings", exports: sb2.exports });
+  check(
+    r.warnings.length === 1 && r.warnings[0] === "::warning title=ci-cache cache key mismatch::RUSTFLAGS: sandbox=(missing) ci=-D warnings",
+    `one warning, sides not swapped: sandbox=(missing) ci=-D warnings (got ${JSON.stringify(r.warnings)})`,
+  );
+  check(r.summary.includes("| RUSTFLAGS | (missing) | -D warnings |") && !r.summary.includes("(empty)"), "one summary row, with the right sides");
+  r = await ci({ name: "unset-vs-empty", rustflags: "", exports: sb2.exports });
+  check(r.warnings.length === 0 && r.output.includes("fingerprint-compare=match"), "unset and empty RUSTFLAGS are the same: no warning");
+
+  console.log("9. CI without sccache (no RUSTC_WRAPPER, none of the sandbox's CARGO_/RUSTC_ exports)");
+  sb2 = await sandbox("-D warnings");
+  const turboOnly = Object.fromEntries(Object.entries(sb2.exports).filter(([k]) => !/^(CARGO_|RUSTC_)/.test(k)));
+  r = await ci({ name: "no-sccache", rustflags: "-C debuginfo=0", exports: turboOnly, wrapper: null });
+  check(r.code === 0 && r.warnings.length === 0, `no warnings (got ${JSON.stringify(r.warnings)})`);
+  check(r.out.includes("RUSTC_WRAPPER is not set in this job"), "says why in the log");
+  check(
+    r.summary.includes("sccache is off in this job") && r.summary.includes("<details>") && r.summary.includes("| CARGO_INCREMENTAL | 0 | (missing) |"),
+    "lists the sccache key differences under other differences",
+  );
+  check(r.output.includes("fingerprint-compare=match"), "the status is match (no warning raised)");
 
   console.log("e2e fingerprint: OK");
 } catch (error) {

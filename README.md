@@ -200,10 +200,12 @@ ci-cache compares them automatically:
    downloads the sandbox's for the same branch (`GET /v1/fingerprint`) and compares them
    with `scripts/fingerprint-diff.sh`.
 3. Each line that enters the cache keys (class `KEY`) and differs becomes
-   `::warning title=ci-cache cache key mismatch::RUSTFLAGS: sandbox=-D warnings ci=` plus a
-   table in the job summary. Lines that don't change keys (vCPU, RAM, kernel) are never
-   warnings; tool versions that may change another cache (node, turbo) go in a collapsed
-   block of the summary. No sandbox fingerprint for the branch: one log line, nothing else.
+   `::warning title=ci-cache cache key mismatch::RUSTFLAGS: sandbox=-D warnings ci=(missing)`
+   plus a table in the job summary, one per item (unset and empty count as equal). Lines
+   that don't change keys (vCPU, RAM, kernel) are never warnings; tool versions that may
+   change another cache (node, turbo) go in a collapsed block of the summary, and so do the
+   `KEY` lines when the job has no `RUSTC_WRAPPER` (sccache is off, so they can't cost a
+   hit). No sandbox fingerprint for the branch: one log line, nothing else.
 
 The step never fails the job, and its result is the action output `fingerprint-compare`
 (`match`, `mismatch`, `none`, `skipped` or `error`). `fingerprint-compare: "false"` turns it
