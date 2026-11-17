@@ -139,7 +139,7 @@ Put the action early, before rust-cache. Give the job
         continue-on-error: true            # a cache problem is a slow run, not a red one
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
+          url: ${{ secrets.CI_CACHE_URL }}      # a secret, not a variable: GitHub masks it in logs
           # mount-workdir: auto (default) builds Rust at /home/user/<repo>, like the sandboxes
 ```
 
@@ -222,7 +222,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
       and a `prefix-key` that no old entry shares.
 - [ ] Rust: the toolchain step logs `reused as <pin>-<host>` and rustup's
       `using existing install`, not a download.
-- [ ] Turbo: a step after the action prints `TURBO_API` as the Worker URL.
+- [ ] Turbo: a step after the action says `TURBO_API = the ci-cache Worker` (it compares
+      with `secrets.CI_CACHE_URL` and never prints the URL).
       No Vercel token is left in `env:`.
 - [ ] Docker: a warm run shows the image stages `CACHED`. A build with a
       broken cache still ends green (retried without the cache).

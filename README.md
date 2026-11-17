@@ -14,9 +14,10 @@ No dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](open
 
 ## Quickstart
 
-1. **Deploy the Worker** (one R2 bucket, two lifecycle rules, a few secrets), after setting
-   `ALLOWED_OWNERS` in [`wrangler.jsonc`](wrangler.jsonc) to your GitHub user or org:
-   [Deploying with wrangler](#deploying-with-wrangler).
+1. **Deploy the Worker** (one R2 bucket, two lifecycle rules, a few secrets) with one
+   command: `bash scripts/bootstrap.sh --allowed-owners <your-user-or-org>`
+   ([Deploying](#deploying-with-wrangler)). Save the URL it prints as the GitHub Actions
+   **secret** `CI_CACHE_URL`.
 2. **CI.** Give the job `id-token: write` and add the action early in the job:
 
    ```yaml
@@ -32,7 +33,7 @@ No dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](open
            continue-on-error: true # a cache problem is a slower run, never a red one
            uses: OmarAlex24/ci-cache/setup@<sha>
            with:
-             url: https://ci-cache.<your-subdomain>.workers.dev
+             url: ${{ secrets.CI_CACHE_URL }}   # a secret: GitHub masks it in logs
          - run: pnpm turbo run build   # and/or cargo build: both now go through the Worker
            working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
          - if: always()                # last step: hits, misses and the fingerprint check
@@ -315,7 +316,9 @@ on `/v1/stats*`. Past the limit, those failures answer `429 {"code":"rate_limite
 What it does **not** do: every request, limited or not, is still a Worker invocation that
 you pay for. It stops brute force and expensive work (JWKS, SQL), not a flood. Real
 volumetric protection is a WAF rate-limiting rule on a custom domain in front of the
-Worker, plus not publishing the URL.
+Worker, plus not publishing the URL: keep it in the GitHub secret `CI_CACHE_URL` so it never
+appears in public run logs ([why](#with-scriptsbootstrapsh-recommended)), and give the
+Worker an unguessable name (`bootstrap.sh` does both).
 
 ### Secrets (`wrangler secret put`)
 
@@ -332,6 +335,45 @@ Keys are generated with `node scripts/new-key.mjs sandbox <repoId> <owner/repo> 
 the entry with its hash to merge into the secret. The Worker never stores plaintext keys.
 
 ## Deploying with wrangler
+
+### With `scripts/bootstrap.sh` (recommended)
+
+```sh
+pnpm install
+pnpm wrangler login
+bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> --dry-run   # prints the commands
+bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> [--location weur] [--with-stats]
+```
+
+It is non-interactive and idempotent (rerun it with the same `--name` to finish or repair an
+instance):
+
+1. creates the R2 bucket if missing (`--bucket`, default `ci-cache`; `--location` is a
+   location hint and only applies to a new bucket) and the two lifecycle rules
+   (`ramas-7d` on `ramas/`, `main-30d` on `main/`), skipping the ones that exist;
+2. deploys with `wrangler deploy --config <temporary copy> --name <name> --var
+   ALLOWED_OWNERS:<owners>`. The temporary copy is `wrangler.jsonc` with `bucket_name` set to
+   `--bucket` (and `namespace_id` to `--rate-limit-namespace`, if given), written outside the
+   repo: `wrangler.jsonc` is never edited, so `pnpm run deploy` keeps working as before;
+3. sets `SESSION_SECRET` (`openssl rand -base64 48`, piped to `wrangler secret put`, never
+   printed; kept if it already exists, since a new one would invalidate every session) and
+   `SANDBOX_KEYS`/`STATS_KEYS` = `{}` if missing; with `--with-stats`, `CF_ACCOUNT_ID` and
+   `CF_API_TOKEN` from the environment. If `wrangler secret list` fails, it stops before
+   setting any of them, so a rerun never replaces an existing secret;
+4. prints the Worker URL and the next steps.
+
+`--name` defaults to `ci-cache-<6 random hex>` so the URL isn't guessable; the script prints
+it, and you pass it on every rerun.
+
+**Keep the URL out of public logs.** Store it as the GitHub Actions **secret**
+`CI_CACHE_URL` (per repo or per org), not a variable, and use `${{ secrets.CI_CACHE_URL }}`
+in workflows: GitHub masks secret values in every log line, so on a public repo the URL
+never appears in run logs. The setup action also masks it (and its bare host, which curl
+errors print) with `::add-mask::`, for URLs passed any other way. Dependabot runs only get
+Dependabot secrets: without `CI_CACHE_URL` there, the setup step fails (and, with
+`continue-on-error`, the run is just uncached).
+
+### By hand
 
 ```sh
 pnpm install
@@ -401,7 +443,7 @@ jobs:
       - id: cache
         uses: OmarAlex24/ci-cache/setup@<sha>
         with:
-          url: https://ci-cache.<your-subdomain>.workers.dev
+          url: ${{ secrets.CI_CACHE_URL }}   # a secret: GitHub masks it in logs
           # mount-workdir: auto (default): with Rust, builds at /home/user/<repo> like the sandboxes
       - working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
         run: |
@@ -413,8 +455,8 @@ jobs:
 ```
 
 The action requests the OIDC token (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`) with the
-audience `audience` (default `ci-cache`), calls `POST /v1/session`, masks the tokens
-(`::add-mask::`) and exports:
+audience `audience` (default `ci-cache`), calls `POST /v1/session`, masks the Worker's URL,
+its host and the tokens (`::add-mask::`) and exports:
 
 - `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM` (= the repo name; turbo requires a team and the
   Worker ignores it). On the `main-ro` tier also `TURBO_CACHE=local:rw,remote:r`, because on
@@ -567,6 +609,10 @@ pnpm lint:sh                        # shellcheck of the client scripts
   (different `RUSTFLAGS` → one warning; same values → none). `pnpm e2e:report` runs the
   report action's script on fixtures taken from real turbo and sccache output, and on a
   real turbo run with `TURBO_RUN_SUMMARY=true`.
+- `pnpm e2e:bootstrap` runs `scripts/bootstrap.sh` against a fake `wrangler` that records
+  every call (no Cloudflare account is touched): dry run, a first run, an idempotent rerun,
+  `--with-stats` and validation, checking that no secret reaches argv or the output; then the
+  real wrangler bundles the generated config with `deploy --dry-run`, offline.
 - Analytics Engine can't be queried locally: the query sits behind the `AnalyticsClient`
   interface and the tests check the generated SQL and the shape of the responses.
 

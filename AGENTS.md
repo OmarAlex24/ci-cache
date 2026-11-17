@@ -20,7 +20,7 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `src/stats/` | `/v1/stats`, `/v1/stats/branches`, `/v1/stats/repos` (AE SQL API) |
 | `setup/` | the composite GitHub Action (`action.yml` + `setup.sh` + `fingerprint-compare.sh`) |
 | `report/` | the report action (`action.yml` + `report.sh`): a job summary table at the end of the job |
-| `scripts/` | `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` (the skill keeps an identical copy), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
+| `scripts/` | `bootstrap.sh` (deploy your own instance), `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` (the skill keeps an identical copy), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
 | `test/` | vitest in the Workers runtime (`@cloudflare/vitest-pool-workers`) |
 | `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine |
 | `openapi.yaml` | the API contract; keep it in sync with `src/` |
@@ -36,8 +36,9 @@ pnpm lint:openapi                # redocly lint of openapi.yaml
 pnpm lint:sh                     # shellcheck of the client scripts
 ```
 
-Never run `pnpm run deploy`, `wrangler secret put` or `wrangler r2 …` against a real
-account unless the owner asks for it: they write to production.
+Never run `pnpm run deploy`, `scripts/bootstrap.sh` (without `--dry-run`), `wrangler secret
+put` or `wrangler r2 …` against a real account unless the owner asks for it: they write to
+production. `pnpm e2e:bootstrap` tests the bootstrap with a fake `wrangler`.
 
 ## Invariants (do not break)
 
@@ -80,7 +81,7 @@ jobs:
         continue-on-error: true            # a cache problem is a slower run, never a red one
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
-          url: ${{ vars.CI_CACHE_URL }}    # https://ci-cache.<your-subdomain>.workers.dev
+          url: ${{ secrets.CI_CACHE_URL }}    # a secret, not a variable: GitHub masks it in logs
           # mount-workdir: auto (default): with a Cargo.toml, build at /home/user/<repo> like sandboxes
       - working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
         run: |
@@ -92,6 +93,8 @@ jobs:
 ```
 
 The repo's owner must be in the Worker's `ALLOWED_OWNERS`, or `/v1/session` answers 403.
+`CI_CACHE_URL` is an Actions **secret**, not a variable: GitHub masks it in logs, so the
+Worker's URL never shows up in a public repo's runs (the action also `::add-mask::`s it).
 
 **Sandbox** (Boat, or any shell with an `sk_` key). Mint a key with
 `node scripts/new-key.mjs sandbox <repoId> <owner/repo> boat` (it prints the key once: run it

@@ -89,6 +89,11 @@ try {
   check(r.code === 0, "setup.sh exits cleanly");
   const masks = r.stdout.split("\n").filter((l) => l.startsWith("::add-mask::"));
   check(masks.includes("::add-mask::oidc.fake.jwt") && masks.includes(`::add-mask::${SESSION_TOKEN}`), "masks the OIDC and session tokens");
+  const lines = r.stdout.split("\n");
+  check(
+    lines[0] === `::add-mask::http://127.0.0.1:${port}` && lines[1] === "::add-mask::127.0.0.1",
+    "masks the Worker URL and its bare host first",
+  );
   const firstPlain = r.stdout.split("\n").findIndex((l) => l && !l.startsWith("::add-mask::"));
   check(firstPlain > r.stdout.split("\n").indexOf(`::add-mask::${SESSION_TOKEN}`), "masks before printing anything else");
   check(
@@ -120,7 +125,9 @@ try {
   check(read(r.dir, "env") === "", "and exports nothing");
   sessionReply = realOidc;
   r = await setupOnHost("bad-url", { INPUT_URL: "not a url" });
-  check(r.code !== 0 && r.out.includes("invalid input url"), "validates the url input");
+  check(r.code !== 0 && r.out.includes("invalid input url") && !r.out.includes("not a url"), "validates the url input without echoing it");
+  r = await setupOnHost("empty-url", { INPUT_URL: "" });
+  check(r.code !== 0 && r.out.includes("Dependabot"), "an empty url (no secret, e.g. Dependabot) fails with a hint");
 
   console.log("4. sccache=auto");
   session("rama", "feature/x");
