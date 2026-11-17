@@ -1,6 +1,6 @@
 ---
 name: ci-cache
-description: Onboard a repo onto a ci-cache engine (a Cloudflare Worker on R2 serving the Turbo remote cache and an sccache WebDAV backend; a main/ tier written only by CI on main, per-branch tiers shared by Boat sandboxes and PR CI) and get the most out of it. It audits stacks and existing caches, wires Rust (sccache, the /home/user/<repo> bind mount, rust-cache order), Turbo and Docker (BuildKit type=gha) into GitHub Actions, wires Boat sandboxes (CI_CACHE_SANDBOX_KEY, ci-cache-env.sh), mints keys without printing them, checks cache-key parity, reads /v1/stats and measures the gain. Use it whenever the user mentions ci-cache or its setup action, sccache or RUSTC_WRAPPER, a remote compile cache, Turbo remote cache or TURBO_TOKEN, Swatinem/rust-cache, BuildKit or Docker layer caching in CI, cache hit rate or misses, a sandbox build CI did not reuse, reuseAlert, the 10 GB Actions cache limit, or making Boat CI faster with caching, even if they never say ci-cache.
+description: Onboard a repo onto a ci-cache engine (a Cloudflare Worker on R2 serving the Turbo remote cache and an sccache WebDAV backend; a main/ tier written only by CI on main, per-branch tiers shared by Boat sandboxes and PR CI) and get the most out of it. It audits stacks and existing caches, wires Rust (sccache, the /home/user/<repo> bind mount, rust-cache order), Turbo and Docker (BuildKit type=gha) into GitHub Actions, wires Boat sandboxes (CI_CACHE_SANDBOX_KEY, ci-cache-env.sh), mints keys without printing them, checks cache-key parity (automatic sandbox vs CI fingerprint warnings), adds the job summary report action, deploys a new instance with bootstrap.sh, reads /v1/stats and measures the gain. Use it whenever the user mentions ci-cache or its setup action, sccache or RUSTC_WRAPPER, a remote compile cache, Turbo remote cache or TURBO_TOKEN, Swatinem/rust-cache, BuildKit or Docker layer caching in CI, cache hit rate or misses, a sandbox build CI did not reuse, a "cache key mismatch" warning, reuseAlert, deploying their own ci-cache, the 10 GB Actions cache limit, or making Boat CI faster with caching, even if they never say ci-cache.
 ---
 
 # CI cache (ci-cache engine)
@@ -22,8 +22,8 @@ getting that parity and proving it with numbers.
 | --- | --- |
 | `scripts/audit-cache.sh` | Stack detection, cache steps in the workflows, Actions cache usage vs the 10 GB limit. Run first. |
 | `scripts/mint-sandbox-key.sh` | Mint a sandbox key and merge it into the local key files without printing it. |
-| `scripts/connect-sandbox.sh` | Wire a repo's Boat environment: both variables from stdin, `ci-cache-env.sh` and the sccache installer as secret files, `boat env upgrade`. Names only, `--dry-run`. |
-| `scripts/fingerprint-diff.sh` | Diff the sandbox and CI cache fingerprints; flags the lines that break keys. |
+| `scripts/connect-sandbox.sh` | Wire a repo's Boat environment: both variables from stdin, `ci-cache-env.sh`, `cache-fingerprint.sh` and the sccache installer as secret files, `boat env upgrade`. Names only, `--dry-run`. |
+| `scripts/fingerprint-diff.sh` | Diff two cache fingerprints by hand; flags the lines that break keys. The setup action already does this on every branch-tier job. |
 | `scripts/cache-stats.sh` | Read `/v1/stats` and `/v1/stats/branches` (sandbox→CI reuse per branch). |
 | `scripts/job-durations.sh` | First-attempt job durations from the jobs API, with the median. |
 | `scripts/machine-class.sh` | iowait and steal of a run from boated-ci's machine samples: classifies the run as `fast` or `slow-io`. |
@@ -39,12 +39,15 @@ fails if it is unset; `audit-cache.sh` checks the owner against
 
 ## The engine in one screen
 
-- Worker: your deployment, `https://ci-cache.<your-subdomain>.workers.dev`
-  (`CI_CACHE_URL`). Engine repo `OmarAlex24/ci-cache`, or your fork, checked
-  out at `CI_CACHE_REPO`. Its README and `openapi.yaml` are the contract.
-  API only: there is no dashboard.
-- R2 bucket `ci-cache-weur` (Europe, next to Boat's OVH machines). Metrics go
-  to Workers Analytics Engine.
+- Worker: your deployment (`CI_CACHE_URL`; in workflows the Actions
+  **secret** `secrets.CI_CACHE_URL`, never a variable, so GitHub masks it).
+  Engine repo `OmarAlex24/ci-cache`, or your fork, checked out at
+  `CI_CACHE_REPO`. Its README and `openapi.yaml` are the contract. API only:
+  there is no dashboard. No deployment yet? `bash scripts/bootstrap.sh
+  --allowed-owners <owner> --dry-run` in the engine repo, then without
+  `--dry-run` (with the owner's OK: it writes to their Cloudflare account).
+- One R2 bucket (`bootstrap.sh` defaults to `ci-cache`; put it near whoever
+  compiles with `--location`). Metrics go to Workers Analytics Engine.
 - **Tiers.** The identity decides the tier. The client never chooses it.
 
   | Who | Tier | Reads | Writes |
@@ -58,10 +61,14 @@ fails if it is unset; `audit-cache.sh` checks the owner against
   and `main/` after 30, counted from upload.
 - **Sessions:** `POST /v1/session` with a GitHub OIDC token (audience
   `ci-cache`) or a sandbox key. It returns an HMAC session token valid for 6 h.
-- **Protocols:** Turbo at `/v8/artifacts`, WebDAV at `/dav/` for sccache.
-  Stats at `/v1/stats` and `/v1/stats/branches` take an `rk_…` key.
-- **CI side:** the `OmarAlex24/ci-cache/setup@<sha>` action. Sandbox side:
-  `scripts/ci-cache-env.sh`.
+- **Protocols:** Turbo at `/v8/artifacts`, WebDAV at `/dav/` for sccache,
+  cache fingerprints at `/v1/fingerprint`. Stats at `/v1/stats` and
+  `/v1/stats/branches` take an `rk_…` key. Bad credentials are rate limited
+  per IP (429); valid ones never are.
+- **CI side:** the `OmarAlex24/ci-cache/setup@<sha>` action (session,
+  `mount-workdir: auto`, sccache, fingerprint comparison) and
+  `OmarAlex24/ci-cache/report@<sha>` (job summary). Sandbox side:
+  `scripts/ci-cache-env.sh` (session, then fingerprint upload).
 
 Full detail, with inputs, outputs and every exported variable:
 `references/engine.md`.
@@ -83,7 +90,8 @@ Full detail, with inputs, outputs and every exported variable:
    Docker build retries without the cache, and sccache stays off if it
    can't start. A cache problem makes a run slower, never red.
 3. **Writes to shared infrastructure need the engine owner's OK.** That
-   covers `wrangler secret put`, `wrangler deploy` and `gh cache delete`.
+   covers `scripts/bootstrap.sh` (without `--dry-run`), `wrangler secret
+   put`, `wrangler deploy` and `gh cache delete`.
    Print the target, show the command, and wait for their answer.
 4. **Every push costs a Boat start.** In a stack of N PRs, a push to the base
    costs N. Push only the top branch. Put temporary measurement code in a
@@ -143,6 +151,14 @@ Put the action early, before rust-cache. Give the job
           # mount-workdir: auto (default) builds Rust at /home/user/<repo>, like the sandboxes
 ```
 
+End the job with the report step, so every run shows its own numbers:
+
+```yaml
+      - if: always()
+        continue-on-error: true
+        uses: OmarAlex24/ci-cache/report@<sha>   # the same SHA as setup
+```
+
 Then follow the guide for each stack:
 - **Rust** (`references/rust.md`):
   - export `CI_WORKDIR` from `steps.cache.outputs.workdir`, and make every
@@ -170,9 +186,10 @@ Boat has no startup hook, so a sandbox writes to the cache only if its agent
 opens a session. Wire both ends:
 1. **The environment.** Run `scripts/connect-sandbox.sh <owner/repo> [env]`,
    first with `--dry-run`. It sets `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY`
-   (from stdin), delivers `~/.ci-cache/ci-cache-env.sh` and
-   `~/.ci-cache/install-sccache.sh` (the image has no sccache), and runs
-   `boat env upgrade`. A repo without an environment needs `--create-env`.
+   (from stdin), delivers `~/.ci-cache/ci-cache-env.sh`,
+   `~/.ci-cache/cache-fingerprint.sh` (uploaded after each session so CI
+   can compare) and `~/.ci-cache/install-sccache.sh` (the image has no
+   sccache), and runs `boat env upgrade`. A repo without an environment needs `--create-env`.
    Never use `base`: CI runners start from it.
 2. **Parity.** Copy the CI values of every variable that enters the keys
    with `set-var`, for example `RUSTFLAGS` and `CARGO_TERM_COLOR`.
@@ -191,10 +208,14 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 → `references/sandbox.md`.
 
 ### 5. Verify
-- Run `scripts/fingerprint-diff.sh` on a sandbox fingerprint and a CI run.
-  Every line it flags as `KEY` is a reason to miss.
-- Check the bind mount with `stat -c '%d:%i'`.
-- Look at `sccache --show-stats` in the job summary.
+- Read the PR run's `ci-cache cache key mismatch` warnings and the
+  fingerprint table in the job summary: every row is a reason to miss.
+  (By hand: `scripts/fingerprint-diff.sh` on a sandbox fingerprint and a CI
+  log.)
+- Check the bind mount with `stat -c '%d:%i'` (`mount-workdir: auto` logs
+  why it skipped the mount, if it did).
+- Read the report's table in the job summary: sccache hit rate, Turbo tasks
+  from cache, fingerprint result.
 - Read `scripts/cache-stats.sh <owner/repo>`: per branch,
   `ciHitsOnSandboxObjects / sandboxWrites`.
 
@@ -217,7 +238,10 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
       (`rama` on a PR, `main` on a push to main).
 - [ ] Rust: `checkout: /home/user/<repo>` in the CI fingerprint. The
       `target/` saved and the one built have the same `device:inode`.
-      `fingerprint-diff.sh` flags no `KEY` lines against a sandbox.
+      The action's fingerprint comparison says `match` (no
+      `cache key mismatch` warning) after a sandbox build on the branch.
+- [ ] The report step's table is in the job summary.
+- [ ] The workflow reads `secrets.CI_CACHE_URL`, not `vars.CI_CACHE_URL`.
 - [ ] Rust: rust-cache comes after the action, with `cache-targets: false`
       and a `prefix-key` that no old entry shares.
 - [ ] Rust: the toolchain step logs `reused as <pin>-<host>` and rustup's
@@ -240,7 +264,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
 - **Wrong path.** The Boat CI checkout is
   `$HOME/actions-runner/_work/<repo>/<repo>`, but sandboxes build in
   `/home/user/<repo>`. sccache hashes the cwd, so without the bind mount
-  nothing is reused.
+  nothing is reused. `mount-workdir: auto` mounts it, but the build must
+  run in `steps.<id>.outputs.workdir`.
 - **A `target/` restored from another path**, or one built without sccache,
   poisons the keys: sccache hashes `--extern` rlib content. Use
   `cache-targets: false` and bump `prefix-key`.
@@ -291,7 +316,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
   release once; `ci-cache-env.sh` could rename the image's `stable` like
   CI does.
 - Replay of Rust test results (a design exists).
-- A fingerprint diff that explains a miss on the server side.
+- A fingerprint diff on the server side (`/v1/stats/branches` saying which
+  input differed); today the action compares per run.
 - Go through `GOCACHEPROG`.
 - Temporary Docker credentials.
 - Sandbox tokens bound to one branch.

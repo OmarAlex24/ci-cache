@@ -40,10 +40,13 @@ monorepo):
     `new-key.mjs` and merges it into the local key files, without printing
     it.
   - `connect-sandbox.sh`: wires a repo's Boat environment (both
-    variables from stdin, the session script and an sccache installer as
-    secret files, `boat env upgrade`), printing names only.
+    variables from stdin, the session script, `cache-fingerprint.sh` and an
+    sccache installer as secret files, `boat env upgrade`), printing names
+    only.
   - `fingerprint-diff.sh`: diffs a sandbox fingerprint against a CI run's
-    log and marks every difference that breaks cache keys.
+    log and marks every difference that breaks cache keys (an identical
+    copy of the engine's `scripts/fingerprint-diff.sh`, which the setup
+    action runs on its own on every branch-tier job).
   - `cache-stats.sh`: `/v1/stats` and `/v1/stats/branches`, with the
     sandbox→CI reuse ratio per branch.
   - `job-durations.sh`: first-attempt job durations and the median.

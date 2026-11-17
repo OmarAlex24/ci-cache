@@ -311,7 +311,23 @@ parity problem. Diff the fingerprints.
 
 ## Fingerprint parity
 
-The action prints the fingerprint in its step, after the line `== machine`.
+**Automatic.** `ci-cache-env.sh` uploads the sandbox's fingerprint after
+each session (it needs `cache-fingerprint.sh` next to it:
+`connect-sandbox.sh` delivers both). On the branch tier, the setup action
+downloads it after the mount and compares it with CI's own. Each differing
+line that enters the keys becomes
+
+```
+::warning title=ci-cache cache key mismatch::RUSTFLAGS: sandbox=-D warnings ci=
+```
+
+and a row in the job summary; the action output `fingerprint-compare` is
+`match`, `mismatch`, `none` (no sandbox fingerprint for the branch),
+`skipped` or `error`. It never fails the job. The comparison sees the job's
+`env:`, not a later step's: keep key variables at job level.
+
+**By hand** (an old action pin, or to compare two arbitrary runs). The
+action prints the fingerprint in its step, after the line `== machine`.
 In the sandbox, run:
 
 ```bash

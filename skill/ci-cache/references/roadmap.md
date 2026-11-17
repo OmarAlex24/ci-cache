@@ -30,8 +30,9 @@ binary when the same binary has already passed. The design:
 ## Smaller items
 
 - **A fingerprint diff on the server**: explain *why* the cache missed
-  (which input differed) instead of `reuseAlert` alone. Today the client
-  side does this: `scripts/fingerprint-diff.sh`.
+  (which input differed) in `/v1/stats/branches`, next to `reuseAlert`.
+  Today the setup action does it per run (`/v1/fingerprint` plus
+  `setup/fingerprint-compare.sh`), and `scripts/fingerprint-diff.sh` by hand.
 - **Go through `GOCACHEPROG`**: a Go cache program speaking to the Worker,
   so `go build` and `go test` share the tiers. Until then, use `setup-go`'s
   Actions cache.

@@ -15,8 +15,10 @@ when this page and the code disagree. The code wins.
 
 ## Endpoints
 
-Base URL: your deployment, `https://ci-cache.<your-subdomain>.workers.dev`.
-The skill's scripts read it from `CI_CACHE_URL`.
+Base URL: your deployment (`scripts/bootstrap.sh` prints it). The skill's
+scripts read it from `CI_CACHE_URL`; workflows read it from the Actions
+**secret** `CI_CACHE_URL` (a secret, not a variable, so GitHub masks it in
+logs).
 
 | Endpoint | Credential | What it does |
 | --- | --- | --- |
@@ -27,6 +29,8 @@ The skill's scripts read it from `CI_CACHE_URL`.
 | `POST /v8/artifacts` | session | batch lookup (up to 1000 hashes) |
 | `POST /v8/artifacts/events` | session | Turbo events (validated, then dropped) |
 | `GET`/`PUT`/`PROPFIND /dav/…` | session | WebDAV for sccache (PROPFIND only with `Depth: 0`) |
+| `PUT /v1/fingerprint` | session | stores the session's cache fingerprint (text, ≤ 64 KB) under its own tier; `main-ro` gets 403 |
+| `GET /v1/fingerprint` | session | the counterpart: branch CI → its branch's sandbox fingerprint; sandbox → its branch's CI fingerprint, else main's; 404 if none |
 | `GET /v1/stats?repo=<id>&range=<r>` | `rk_…` | hits, misses, bytes and time saved, totals plus `byTier`, `byKind`, `byProtocol` |
 | `GET /v1/stats/branches?repo=<id>&range=<r>` | `rk_…` | per branch: `sandboxWrites`, `ciReads`, `ciHits`, `ciHitsOnSandboxObjects`, `reuseAlert` |
 | `GET /v1/stats/repos?range=<r>` | `rk_…` | the repos with traffic in the range: `repoId`, `repo`, `lastSeenAt`, `totals`, `reuseAlerts` |
@@ -35,6 +39,10 @@ The skill's scripts read it from `CI_CACHE_URL`.
   `gh api repos/O/R --jq .id`.
 - `range` is one of `1h`, `24h`, `7d` (the default), `30d` or `90d`.
   Analytics Engine keeps data for 3 months.
+- A request **without a valid credential** (bad or missing Bearer, a failed
+  session, a bad `rk_`) counts against a per-IP limit (30 per 60 s by
+  default); past it, failures get `429 rate_limited`. Valid credentials are
+  never limited, so shared CI runner IPs are safe.
 - Every response carries `Server-Timing`: `session`, `r2-own`, `r2-main`,
   `r2-put` and `total`. To split network time from Worker time and R2 time,
   run `curl -w '%{time_starttransfer} %header{server-timing}'`.
@@ -43,7 +51,9 @@ The skill's scripts read it from `CI_CACHE_URL`.
 
 The R2 layout is `main/<repoId>/{turbo,sccache}/…` and
 `ramas/<repoId>/<branchKey>/{turbo,sccache}/…`, where `branchKey` is the
-first 16 hex characters of `sha256(branch)`.
+first 16 hex characters of `sha256(branch)`. Fingerprints live at
+`ramas/<repoId>/<branchKey>/fingerprint/<sandbox|ci>` and
+`main/<repoId>/fingerprint/ci`.
 
 The Worker decides the tier in this order (`src/session/policy.ts`):
 
@@ -71,7 +81,9 @@ records who wrote it (`writer-kind`: `ci` or `sandbox`), and that is how
 
 `OmarAlex24/ci-cache/setup@<sha>` (or `<your-fork>/ci-cache/setup@<sha>`).
 Pin a full commit SHA from the engine repo. It is a composite action that
-runs `setup/setup.sh`, then `scripts/cache-fingerprint.sh`.
+runs `setup/setup.sh`, then `scripts/cache-fingerprint.sh`, then
+`setup/fingerprint-compare.sh` (in the `workdir`, with the session's
+exports). It masks the Worker URL and its host with `::add-mask::`.
 
 The job needs `permissions: id-token: write`. Without it, the action fails
 with "no OIDC token".
@@ -113,6 +125,8 @@ and the fingerprint comparison. It never fails the job.
   `CARGO_INCREMENTAL=0`. If the server fails to start, the action emits a
   `::warning::` and the run compiles without sccache.
 - It adds the sccache directory to `$GITHUB_PATH`.
+- `TURBO_RUN_SUMMARY=true`, unless the job sets it (`turbo-summary`), for
+  the report action.
 
 The action does **not** export `CI_WORKDIR`. Workflows export it themselves
 from `steps.<id>.outputs.workdir` (see `rust.md`).
@@ -138,8 +152,11 @@ It writes `~/.ci-cache.env` (mode 600) with these exports:
 - `CARGO_INCREMENTAL=0`;
 - `RUSTC_WRAPPER=sccache`, only if `sccache` is on `PATH`.
 
-Then it stops the sccache server, so the next build picks up the new token.
-It never prints the key or the token.
+Then it stops the sccache server, so the next build picks up the new token,
+and uploads the checkout's cache fingerprint (`cache-fingerprint.sh` must
+sit next to it, or `CI_CACHE_FINGERPRINT_SCRIPT`; `CI_CACHE_FINGERPRINT=false`
+skips it). A failed upload is only a warning. It never prints the key or
+the token, and refuses to upload a fingerprint that contains either.
 
 ## Keys and secrets the Worker holds
 
@@ -173,7 +190,8 @@ reads: use `scripts/mint-sandbox-key.sh` from this skill (see `keys.md`).
 
 ## Who can use it
 
-- `ALLOWED_OWNERS` (in `wrangler.jsonc`) is a comma-separated list of
+- `ALLOWED_OWNERS` (in `wrangler.jsonc`, or `--allowed-owners` of
+  `scripts/bootstrap.sh`, which deploys it as a `--var`) is a comma-separated list of
   GitHub users or orgs, compared case-insensitively. A repository owned by
   anyone else gets a 403 from `/v1/session` until that list is edited and
   the Worker redeployed, which needs the engine owner's OK.
