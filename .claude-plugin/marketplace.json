@@ -1,0 +1,15 @@
+{
+  "name": "ci-cache",
+  "description": "The ci-cache skill for Claude Code: onboard repos onto a ci-cache engine (Turbo and sccache remote cache on Cloudflare R2)",
+  "owner": {
+    "name": "OmarAlex24"
+  },
+  "plugins": [
+    {
+      "name": "ci-cache",
+      "source": "./skill/ci-cache",
+      "description": "Onboard a repo onto a ci-cache engine: CI and sandbox wiring for sccache and Turbo, keys, parity checks and measurement",
+      "license": "Apache-2.0"
+    }
+  ]
+}

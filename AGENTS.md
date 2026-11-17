@@ -70,7 +70,7 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `report/` | the report action (`action.yml` + `report.sh`): a job summary table at the end of the job |
 | `scripts/` | `bootstrap.sh` (deploy your own instance), `ci-cache-env.sh` (sandbox side), `install-sandbox.sh` (installs it, SHA-256 checked; `--check-sums` after changing a file it installs), `cache-fingerprint.sh`, `fingerprint-diff.sh` and `job-durations.sh` (the skill keeps identical copies), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
 | `test/` | vitest in the Workers runtime (`@cloudflare/vitest-pool-workers`) |
-| `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine |
+| `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine; a plugin (`.claude-plugin/plugin.json`) listed by the repo's marketplace (`.claude-plugin/marketplace.json`; `claude plugin validate .`) |
 | `openapi.yaml` | the API contract; keep it in sync with `src/` |
 
 ## Commands

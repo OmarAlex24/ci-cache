@@ -100,7 +100,13 @@ PR's CI:
 
 Agents working on this repo, or connecting another repo to it, start at
 [`AGENTS.md`](AGENTS.md). The [`skill/ci-cache`](skill/ci-cache) Claude Code skill automates
-onboarding a repo (audit, keys, CI and sandbox wiring, measurement).
+onboarding a repo (audit, keys, CI and sandbox wiring, measurement). Install it as a plugin
+from this repo:
+
+```
+/plugin marketplace add OmarAlex24/ci-cache
+/plugin install ci-cache@ci-cache
+```
 
 ## Before you start: Cloudflare
 
