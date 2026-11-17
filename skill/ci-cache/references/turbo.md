@@ -38,8 +38,9 @@ environment.
 ```
 
 `mount-workdir` is only needed for sccache. Turbo hashes paths relative to
-the repo root, so the checkout path doesn't change its keys. Without Rust,
-leave `mount-workdir` off: it also avoids the pnpm problem below.
+the repo root, so the checkout path doesn't change its keys. Without a
+`Cargo.toml`, the default `mount-workdir: auto` doesn't mount, which also
+avoids the pnpm problem below.
 
 ## Remove Vercel's cache
 
@@ -111,7 +112,7 @@ need to show which tasks hit.
 
 ## pnpm under the bind mount
 
-With `mount-workdir: "true"`, the checkout appears at both
+With the mount (`mount-workdir: auto` on a repo with Rust, or `"true"`), the checkout appears at both
 `$GITHUB_WORKSPACE` and `/home/user/<repo>`. pnpm hard-links packages from
 its store into `node_modules`. A store that `setup-node`'s `cache: pnpm`
 restored on the other side of the mount fails with **EXDEV** (a cross-device

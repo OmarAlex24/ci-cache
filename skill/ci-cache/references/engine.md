@@ -85,11 +85,20 @@ with "no OIDC token".
 | `sccache` | `auto` | `auto` installs it if a `Cargo.toml` is found within depth 3 (outside `node_modules` and `target`); `true` or `false` force it |
 | `sccache-version` | `0.19.0` | any other version needs `sccache-sha256` |
 | `sccache-sha256` | pinned for 0.19.0 (x86_64, aarch64) | tarball SHA-256 |
-| `mount-workdir` | `"false"` | `"true"` runs `sudo mount --bind $GITHUB_WORKSPACE /home/user/<repo>`; it fails if that directory exists and is not empty |
+| `mount-workdir` | `auto` | `sudo mount --bind $GITHUB_WORKSPACE /home/user/<repo>`. `auto`: only with a `Cargo.toml`, on Linux, with passwordless sudo; otherwise (or if the target isn't empty, or the mount fails) a log line and no mount. `"true"`: mount or fail. `"false"`: never |
 | `fingerprint` | `"true"` | prints the cache fingerprint after the session |
+| `fingerprint-compare` | `"true"` | uploads CI's fingerprint and, on the branch tier, compares it with the sandbox's: one `::warning` per differing key line, plus a job summary table |
+| `turbo-summary` | `"true"` | exports `TURBO_RUN_SUMMARY=true` (unless the job sets it) so the report action can count Turbo hits |
 
-**Outputs:** `tier`, `branch`, `expires-at` and `workdir`. `workdir` is
-`/home/user/<repo>` with the mount, otherwise `GITHUB_WORKSPACE`.
+**Outputs:** `tier`, `branch`, `expires-at`, `workdir` and
+`fingerprint-compare` (`match`, `mismatch`, `none`, `skipped`, `error`).
+`workdir` is `/home/user/<repo>` with the mount, otherwise `GITHUB_WORKSPACE`.
+
+**Report action** (`OmarAlex24/ci-cache/report@<sha>`): last step of the job,
+with `if: always()` and `continue-on-error: true`. It writes a table to the
+job summary: tier and branch, sccache hits/misses and hit rate, Turbo tasks
+from cache (from `.turbo/runs/*.json`, written thanks to `TURBO_RUN_SUMMARY`),
+and the fingerprint comparison. It never fails the job.
 
 **Exported to `$GITHUB_ENV`**
 

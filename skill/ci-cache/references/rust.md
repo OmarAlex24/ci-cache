@@ -47,7 +47,11 @@ Consequences:
 
 ## The path: bind mount and CI_WORKDIR
 
-`mount-workdir: "true"` bind-mounts the checkout at `/home/user/<repo>`. Two
+The setup action's `mount-workdir` (default `auto`) bind-mounts the checkout
+at `/home/user/<repo>` when the repo has a `Cargo.toml` and the runner is
+Linux with passwordless sudo. Otherwise, or if the target is not empty or the
+mount fails, it logs why and builds in `$GITHUB_WORKSPACE` (exit 0).
+`"true"` forces the mount and fails if it can't; `"false"` never mounts. Two
 more pieces are needed:
 
 ```yaml
@@ -237,7 +241,7 @@ jobs:
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
           url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
-          mount-workdir: "true"
+          # mount-workdir: auto (the default) mounts /home/user/<repo> for Rust
       - name: "rust: build directory"
         if: steps.cache.outputs.workdir != ''
         env:

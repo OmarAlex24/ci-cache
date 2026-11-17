@@ -73,6 +73,7 @@ async function setupOnHost(name, inputs = {}, extraEnv = {}) {
     INPUT_SCCACHE_VERSION: "0.19.0",
     INPUT_SCCACHE_SHA256: "",
     INPUT_MOUNT_WORKDIR: "false",
+    RUNNER_TEMP: dir,
     ...inputs,
     ...extraEnv,
   };
@@ -91,10 +92,16 @@ try {
   const firstPlain = r.stdout.split("\n").findIndex((l) => l && !l.startsWith("::add-mask::"));
   check(firstPlain > r.stdout.split("\n").indexOf(`::add-mask::${SESSION_TOKEN}`), "masks before printing anything else");
   check(
-    read(r.dir, "env") === `TURBO_API=http://127.0.0.1:${port}\nTURBO_TOKEN=${SESSION_TOKEN}\nTURBO_TEAM=demo\n`,
-    "exports TURBO_API (no trailing slash), TURBO_TOKEN and TURBO_TEAM=repo name",
+    read(r.dir, "env") === `TURBO_API=http://127.0.0.1:${port}\nTURBO_TOKEN=${SESSION_TOKEN}\nTURBO_TEAM=demo\nTURBO_RUN_SUMMARY=true\n`,
+    "exports TURBO_API (no trailing slash), TURBO_TOKEN, TURBO_TEAM=repo name and TURBO_RUN_SUMMARY",
   );
+  check(read(r.dir, "ci-cache/session") === `tier=main\nbranch=main\nworkdir=${join(r.dir, "workspace")}\n`, "leaves the session state for the report action");
   check(read(r.dir, "output").includes("tier=main\nbranch=main\n") && read(r.dir, "output").includes(`workdir=${join(r.dir, "workspace")}`), "outputs tier, branch and workdir");
+
+  r = await setupOnHost("no-summary", { INPUT_TURBO_SUMMARY: "false" });
+  check(!read(r.dir, "env").includes("TURBO_RUN_SUMMARY"), "turbo-summary: false doesn't export TURBO_RUN_SUMMARY");
+  r = await setupOnHost("user-summary", {}, { TURBO_RUN_SUMMARY: "false" });
+  check(!read(r.dir, "env").includes("TURBO_RUN_SUMMARY"), "doesn't override a TURBO_RUN_SUMMARY the job already sets");
 
   console.log("2. main-ro (schedule)");
   session("main-ro", "main");
@@ -120,16 +127,33 @@ try {
   r = await setupOnHost("auto-no-rust", { INPUT_SCCACHE: "auto" });
   check(r.code === 0 && !read(r.dir, "env").includes("RUSTC_WRAPPER"), "without Cargo.toml it doesn't set up sccache");
 
+  console.log("5. mount-workdir=auto (default)");
+  r = await setupOnHost("mount-auto-no-rust", { INPUT_MOUNT_WORKDIR: undefined });
+  check(r.code === 0 && r.out.includes("mount-workdir auto: no Cargo.toml") && read(r.dir, "output").includes(`workdir=${join(r.dir, "workspace")}`), "the default is auto: without Cargo.toml it builds in GITHUB_WORKSPACE with a log line");
+  if (process.platform !== "linux") {
+    const rust = githubFiles("mount-auto-rust");
+    writeFileSync(join(rust, "workspace", "Cargo.toml"), "[workspace]\n");
+    const res = await run("bash", [SETUP], {
+      env: {
+        PATH: process.env.PATH, HOME: process.env.HOME, GITHUB_ENV: join(rust, "env"), GITHUB_OUTPUT: join(rust, "output"),
+        GITHUB_PATH: join(rust, "path"), GITHUB_REPOSITORY: "acme/demo", GITHUB_WORKSPACE: join(rust, "workspace"),
+        ACTIONS_ID_TOKEN_REQUEST_URL: `http://127.0.0.1:${port}/oidc?api-version=2.0`, ACTIONS_ID_TOKEN_REQUEST_TOKEN: "req-token",
+        INPUT_URL: `http://127.0.0.1:${port}`, INPUT_SCCACHE: "false", INPUT_MOUNT_WORKDIR: "auto",
+      },
+    });
+    check(res.code === 0 && (res.stdout + res.stderr).includes("mount-workdir auto: not Linux"), "with Cargo.toml off Linux it skips the mount with a log line");
+  }
+
   const docker = await run("docker", ["info", "--format", "{{.Architecture}}"]).catch(() => ({ code: 1 }));
   if (docker.code !== 0) {
     console.log("  (no Docker: the sccache install and the mount on Linux are not tested)");
   } else {
-    console.log("5. Linux (Docker, ubuntu:24.04): sccache by SHA-256 and mount --bind");
+    console.log("6. Linux (Docker, ubuntu:24.04): sccache by SHA-256 and mount --bind");
     const inner = [
       "set -e",
       "apt-get update -qq >/dev/null && apt-get install -y -qq curl jq ca-certificates >/dev/null",
       // Runners have passwordless sudo; in the container we are root.
-      "printf '#!/bin/sh\\nexec \"$@\"\\n' > /usr/local/bin/sudo && chmod +x /usr/local/bin/sudo",
+      "printf '#!/bin/sh\\n[ \"$1\" = -n ] && shift\\nexec \"$@\"\\n' > /usr/local/bin/sudo && chmod +x /usr/local/bin/sudo",
       "mkdir -p /gh/workspace/crate && touch /gh/env /gh/output /gh/path",
       // Several Cargo.toml files (workspace + crates), like a real Rust repo.
       "mkdir -p /gh/workspace/crate2 /gh/workspace/a/b && echo '[workspace]' > /gh/workspace/Cargo.toml",
@@ -145,6 +169,11 @@ try {
       'echo "== mounted"; cat /home/user/demo/marker.txt',
       `"$(cat /gh/path)/sccache" --stop-server >/dev/null 2>&1 || true; : > /gh/env`,
       `INPUT_URL=http://host.docker.internal:${port}/broken INPUT_MOUNT_WORKDIR=false bash /setup/setup.sh; echo "== env broken"; cat /gh/env; echo "== end broken"`,
+      // mount-workdir=auto with Cargo.toml: mounts; target not empty or no passwordless sudo: skips, exit 0.
+      `: > /gh/output; GITHUB_REPOSITORY=acme/auto INPUT_MOUNT_WORKDIR=auto INPUT_SCCACHE=false bash /setup/setup.sh; echo "== auto"; cat /gh/output; cat /home/user/auto/marker.txt; echo "== end auto"`,
+      `mkdir -p /home/user/full && touch /home/user/full/x && : > /gh/output; GITHUB_REPOSITORY=acme/full INPUT_MOUNT_WORKDIR=auto INPUT_SCCACHE=false bash /setup/setup.sh; echo "== full rc=$?"; cat /gh/output; echo "== end full"`,
+      `mkdir -p /nosudo && printf '#!/bin/sh\\nexit 1\\n' > /nosudo/sudo && chmod +x /nosudo/sudo && : > /gh/output; PATH=/nosudo:$PATH GITHUB_REPOSITORY=acme/nosudo INPUT_MOUNT_WORKDIR=auto INPUT_SCCACHE=false bash /setup/setup.sh; echo "== nosudo rc=$?"; cat /gh/output; echo "== end nosudo"`,
+      `PATH=/nosudo:$PATH GITHUB_REPOSITORY=acme/strict INPUT_MOUNT_WORKDIR=true INPUT_SCCACHE=false bash /setup/setup.sh && echo "STRICT DID NOT FAIL" || echo "== strict failed as expected"`,
       'echo "== bad sha"; : > /gh/env; rm -rf /opt/hostedtoolcache; INPUT_SCCACHE_SHA256=$(printf "0%.0s" $(seq 64)) bash /setup/setup.sh && echo "DID NOT FAIL" || echo "failed as expected"',
     ].join("\n");
     const res = await run("docker", [
@@ -164,6 +193,11 @@ try {
     const broken = out.split("== env broken")[1]?.split("== end broken")[0] ?? "RUSTC_WRAPPER";
     check(out.includes("sccache did not start against the remote cache") && !broken.includes("RUSTC_WRAPPER") && broken.includes("TURBO_TOKEN"), "if the sccache cache fails at startup, it doesn't enable sccache and keeps Turbo");
     check(out.includes("the sccache SHA-256 does not match") && out.includes("failed as expected"), "a mismatched SHA-256 aborts the install");
+    const section = (name) => out.split(`== ${name}`)[1]?.split(`== end ${name}`)[0] ?? "";
+    check(section("auto").includes("workdir=/home/user/auto") && section("auto").includes("hello"), "mount-workdir=auto with Cargo.toml mounts at /home/user/<repo>");
+    check(out.includes("mount-workdir auto: /home/user/full exists and is not empty") && section("full").startsWith(" rc=0") && section("full").includes("workdir=/gh/workspace"), "auto with a non-empty target skips the mount, exit 0, workdir = GITHUB_WORKSPACE");
+    check(out.includes("mount-workdir auto: no passwordless sudo") && section("nosudo").startsWith(" rc=0") && section("nosudo").includes("workdir=/gh/workspace"), "auto without passwordless sudo skips the mount, exit 0");
+    check(out.includes("== strict failed as expected") && !out.includes("STRICT DID NOT FAIL"), "mount-workdir=true still fails loudly when it can't mount");
   }
   check(seen.includes("GET /oidc") && seen.includes("POST /v1/session"), "the script talked to the expected endpoints");
   console.log("e2e setup/action: OK");

@@ -140,7 +140,7 @@ Put the action early, before rust-cache. Give the job
         uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
         with:
           url: ${{ vars.CI_CACHE_URL }}      # https://ci-cache.<your-subdomain>.workers.dev
-          mount-workdir: "true"            # Rust: build at /home/user/<repo>, like the sandboxes
+          # mount-workdir: auto (default) builds Rust at /home/user/<repo>, like the sandboxes
 ```
 
 Then follow the guide for each stack:

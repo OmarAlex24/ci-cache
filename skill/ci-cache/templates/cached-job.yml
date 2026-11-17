@@ -99,15 +99,16 @@ jobs:
 
       # Session from GitHub OIDC; exports TURBO_API/TURBO_TOKEN/TURBO_TEAM and,
       # with Rust, RUSTC_WRAPPER=sccache + SCCACHE_WEBDAV_* + CARGO_INCREMENTAL=0
-      # (only if the sccache server starts against the Worker). Mounts the
-      # checkout at /home/user/<repo>, the path Boat sandboxes build in.
+      # (only if the sccache server starts against the Worker). With a
+      # Cargo.toml, mount-workdir: auto (the default) mounts the checkout at
+      # /home/user/<repo>, the path Boat sandboxes build in, and compares CI's
+      # cache fingerprint with the sandbox's (warnings on key mismatches).
       - name: ci-cache
         id: cache
         continue-on-error: true # a cache problem is a slow run, not a red one
         uses: OmarAlex24/ci-cache/setup@<sha> # pin a full commit SHA
         with:
           url: ${{ vars.CI_CACHE_URL }} # https://ci-cache.<your-subdomain>.workers.dev
-          mount-workdir: "true"
 
       - name: Build directory
         if: steps.cache.outputs.workdir != ''
@@ -207,3 +208,10 @@ jobs:
             [ "$saved" = "$built" ] || echo "::warning::target/ under the workspace is not the one the build used"
           fi
           { echo '### sccache'; echo '```'; cat "$RUNNER_TEMP/sccache-stats.txt"; echo '```'; } >>"$GITHUB_STEP_SUMMARY"
+
+      # One table in the job summary: tier, sccache hit rate, Turbo tasks from
+      # cache and the sandbox vs CI fingerprint check. Never fails the job.
+      - name: ci-cache report
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: OmarAlex24/ci-cache/report@<sha> # the same SHA as setup
