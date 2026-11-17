@@ -11,8 +11,8 @@
 # Pins are the ones the first rollout used; refresh them when you copy this.
 # Store your Worker's URL as the Actions SECRET CI_CACHE_URL (not a variable:
 # GitHub masks secrets in logs, so on a public repo the URL never shows up in
-# run logs; Dependabot runs need it as a Dependabot secret too), and replace
-# <sha> with a full commit SHA of the ci-cache repo (or your fork).
+# run logs; Dependabot runs need it as a Dependabot secret too).
+# @v1 follows v1.x fixes; pin a full commit SHA of the ci-cache repo (or your fork) if you prefer.
 
 name: CI
 
@@ -108,7 +108,7 @@ jobs:
       - name: ci-cache
         id: cache
         continue-on-error: true # a cache problem is a slow run, not a red one
-        uses: OmarAlex24/ci-cache/setup@<sha> # pin a full commit SHA
+        uses: OmarAlex24/ci-cache/setup@v1 # or a full commit SHA
         with:
           url: ${{ secrets.CI_CACHE_URL }} # a secret, not a variable: GitHub masks it in logs
 
@@ -222,4 +222,4 @@ jobs:
       - name: ci-cache report
         if: ${{ always() }}
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/report@<sha> # the same SHA as setup
+        uses: OmarAlex24/ci-cache/report@v1 # the same ref as setup

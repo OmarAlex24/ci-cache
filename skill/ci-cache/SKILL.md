@@ -72,9 +72,9 @@ fails if it is unset; `audit-cache.sh` checks the owner against
   cache fingerprints at `/v1/fingerprint`. Stats at `/v1/stats` and
   `/v1/stats/branches` take an `rk_…` key. Bad credentials are rate limited
   per IP (429); valid ones never are.
-- **CI side:** the `OmarAlex24/ci-cache/setup@<sha>` action (session,
+- **CI side:** the `OmarAlex24/ci-cache/setup@v1` action (session,
   `mount-workdir: auto`, sccache, fingerprint comparison) and
-  `OmarAlex24/ci-cache/report@<sha>` (job summary). Sandbox side:
+  `OmarAlex24/ci-cache/report@v1` (job summary). Sandbox side:
   `scripts/ci-cache-env.sh` (session, then fingerprint upload; sourcing
   `~/.ci-cache.env` renews it), installed by `scripts/install-sandbox.sh`.
 
@@ -156,7 +156,7 @@ Put the action early, before rust-cache. Give the job
 ```yaml
       - id: cache
         continue-on-error: true            # a cache problem is a slow run, not a red one
-        uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
+        uses: OmarAlex24/ci-cache/setup@v1   # or a full commit SHA
         with:
           url: ${{ secrets.CI_CACHE_URL }}      # a secret, not a variable: GitHub masks it in logs
           # mount-workdir: auto (default) builds Rust at /home/user/<repo>, like the sandboxes
@@ -168,7 +168,7 @@ End the job with the report step, so every run shows its own numbers:
 ```yaml
       - if: always()
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/report@<sha>   # the same SHA as setup
+        uses: OmarAlex24/ci-cache/report@v1   # the same ref as setup
 ```
 
 Then follow the guide for each stack:
@@ -201,7 +201,7 @@ its agent opens a session; no provider runs it for you. Wire both ends:
 2. **The client.** In the image or at boot, the engine's installer, pinned
    to a commit and SHA-256 checked (`--rust` also installs CI's sccache):
    ```bash
-   ref=<full commit SHA of OmarAlex24/ci-cache>
+   ref=v1.0.0   # a release tag (immutable) or a full commit SHA
    curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
      bash -s -- --ref "$ref" --rust
    ```

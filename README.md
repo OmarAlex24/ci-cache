@@ -47,14 +47,14 @@ R2 enabled and a workers.dev subdomain: new to Cloudflare? Read
          - uses: actions/checkout@v5
          - id: cache
            continue-on-error: true # a cache problem is a slower run, never a red one
-           uses: OmarAlex24/ci-cache/setup@<sha>
+           uses: OmarAlex24/ci-cache/setup@v1
            with:
              url: ${{ secrets.CI_CACHE_URL }}   # a secret: GitHub masks it in logs
          - run: pnpm turbo run build   # and/or cargo build: both now go through the Worker
            working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
          - if: always()                # last step: hits, misses and the fingerprint check
            continue-on-error: true
-           uses: OmarAlex24/ci-cache/report@<sha>
+           uses: OmarAlex24/ci-cache/report@v1
    ```
 3. **Check it hits.** The setup step logs `ci-cache: session <tier>`. Run the job twice: the
    report step's table in the job summary shows the sccache hit rate and the Turbo tasks
@@ -666,7 +666,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: cache
-        uses: OmarAlex24/ci-cache/setup@<sha>
+        uses: OmarAlex24/ci-cache/setup@v1
         with:
           url: ${{ secrets.CI_CACHE_URL }}   # a secret: GitHub masks it in logs
           # mount-workdir: auto (default): with Rust, builds at /home/user/<repo> like the sandboxes
@@ -677,7 +677,7 @@ jobs:
           cargo build --locked
       - if: always()
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/report@<sha>   # the same SHA as setup
+        uses: OmarAlex24/ci-cache/report@v1   # the same ref as setup
 ```
 
 The action requests the OIDC token (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`) with the
@@ -721,7 +721,7 @@ The last step of the job, after everything that builds:
       - name: ci-cache report
         if: always()
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/report@<sha>   # the same SHA as setup
+        uses: OmarAlex24/ci-cache/report@v1   # the same ref as setup
 ```
 
 It writes one table to the job summary (`$GITHUB_STEP_SUMMARY`):
@@ -762,7 +762,7 @@ label without printing it and merges its hash into the `SANDBOX_KEYS` map you up
 checked against a SHA-256 embedded in the installer, and a mismatch installs nothing:
 
 ```sh
-ref=<full commit SHA of OmarAlex24/ci-cache>
+ref=v1.0.0   # a release tag (immutable) or a full commit SHA
 curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
   bash -s -- --ref "$ref" --rust      # --rust also installs sccache (Linux x86_64/aarch64)
 ```

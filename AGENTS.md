@@ -134,7 +134,7 @@ jobs:
       - uses: actions/checkout@v5
       - id: cache
         continue-on-error: true            # a cache problem is a slower run, never a red one
-        uses: OmarAlex24/ci-cache/setup@<sha>   # pin a full commit SHA
+        uses: OmarAlex24/ci-cache/setup@v1   # or a full commit SHA
         with:
           url: ${{ secrets.CI_CACHE_URL }}    # a secret, not a variable: GitHub masks it in logs
           # mount-workdir: auto (default): with a Cargo.toml, build at /home/user/<repo> like sandboxes
@@ -144,7 +144,7 @@ jobs:
           cargo build --locked
       - if: always()                       # job summary: hits, misses, fingerprint check
         continue-on-error: true
-        uses: OmarAlex24/ci-cache/report@<sha>  # the same SHA as setup
+        uses: OmarAlex24/ci-cache/report@v1  # the same ref as setup
 ```
 
 The repo's owner must be in the Worker's `ALLOWED_OWNERS`, or `/v1/session` answers 403.
@@ -159,7 +159,7 @@ prints the key once: run it where nobody reads the terminal), merge the hash ent
 client, then, in the repo, on the PR's branch:
 
 ```sh
-ref=<full commit SHA of OmarAlex24/ci-cache>
+ref=v1.0.0   # a release tag (immutable) or a full commit SHA
 curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
   bash -s -- --ref "$ref" [--rust]
 bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env
