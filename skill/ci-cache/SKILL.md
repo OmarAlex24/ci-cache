@@ -222,7 +222,8 @@ Connecting a repo to sandboxes in Boat's GitHub settings, so that
       and a `prefix-key` that no old entry shares.
 - [ ] Rust: the toolchain step logs `reused as <pin>-<host>` and rustup's
       `using existing install`, not a download.
-- [ ] Turbo: a step after the action prints `TURBO_API` as the Worker URL.
+- [ ] Turbo: a step after the action says `TURBO_API = the ci-cache Worker` (it compares
+      with `secrets.CI_CACHE_URL` and never prints the URL).
       No Vercel token is left in `env:`.
 - [ ] Docker: a warm run shows the image stages `CACHED`. A build with a
       broken cache still ends green (retried without the cache).

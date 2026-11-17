@@ -30,8 +30,15 @@ environment.
           sccache: "false"          # a TS-only repo; omit to auto-detect Rust
       - name: ci-cache check
         continue-on-error: true
+        env:
+          CI_CACHE_URL: ${{ secrets.CI_CACHE_URL }}
         run: |
-          echo "TURBO_API=${TURBO_API:-unset}"           # the URL is not secret
+          # Compared, never printed: the URL stays out of the log.
+          case ${TURBO_API:-} in
+            "") echo "TURBO_API unset" ;;
+            "${CI_CACHE_URL%/}") echo "TURBO_API = the ci-cache Worker" ;;
+            *) echo "TURBO_API is something else: an env: entry shadows it" ;;
+          esac
           echo "TURBO_TOKEN=${TURBO_TOKEN:+set}"          # never the value
           echo "TURBO_TEAM=${TURBO_TEAM:-unset}"
       - run: pnpm turbo run build lint test
