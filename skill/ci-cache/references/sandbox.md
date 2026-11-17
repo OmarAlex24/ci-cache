@@ -1,7 +1,18 @@
-# Boat sandboxes: wiring the agent's side
+# Sandboxes: wiring the agent's side
 
-The payoff of ci-cache is that the agent's own build in its Boat sandbox
-warms the cache for its PR. This page is about that side.
+The payoff of ci-cache is that the agent's own build in its sandbox warms
+the cache for its PR. This page is about that side.
+
+**Any provider** needs the same four things: `CI_CACHE_URL` and
+`CI_CACHE_SANDBOX_KEY` in the sandbox's environment (a key per provider:
+`mint-sandbox-key.sh <repo> <label>`, `keys.md`), the client installed with
+the engine's `scripts/install-sandbox.sh --ref <sha> [--rust]` (pinned,
+SHA-256 checked; the engine README's "Sandboxes"), the repo cloned at the
+path CI mounts (`/home/user/<repo>`, or the action's `workdir-path`), and
+`bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env` before
+building. The rest of this page is the Boat recipe, the provider this was
+built and measured on; most of it (the agent guide, the per-session steps,
+the PR flow) applies anywhere.
 
 ## Contents
 - What a Boat sandbox has
@@ -67,7 +78,8 @@ It does, in order:
    repos, live sandboxes, and whether `CI_CACHE_URL` and
    `CI_CACHE_SANDBOX_KEY` are set.
 3. **Set both variables** through stdin. The key comes from
-   `CI_CACHE_SANDBOX_KEY_<REPO>` in `~/.config/ci-cache/keys.env`, inside a
+   `CI_CACHE_SANDBOX_KEY_<REPO>` in `~/.config/ci-cache/keys.env` (with
+   `--label <label>`, `CI_CACHE_SANDBOX_KEY_<REPO>__<LABEL>`), inside a
    subshell. The key is set again even if it is already there: a value
    can't be compared without printing it, and after a rotation the
    environment holds a stale key.
@@ -157,9 +169,10 @@ on the sandbox, so it is a no-op on a laptop:
   `TURBO_CACHE=local:rw` when CI does: in one onboarded repo the tests read
   files Turbo doesn't hash, so a remote hit could replay a stale pass.
 
-Both say: only in a Boat sandbox (`BOAT_ID` set and `~/.ci-cache/`
-present), refresh after a branch switch and every 6 h, work on the PR's
-head branch, and rebase onto `origin/main` before the final build.
+Both say: only in a sandbox (`~/.ci-cache/` present; in Boat, `BOAT_ID`
+set), `source ~/.ci-cache.env` in every shell that builds (it renews the
+session by itself), work on the PR's head branch, and rebase onto
+`origin/main` before the final build.
 
 ## Per session: refresh, branch, rebase
 
@@ -171,11 +184,13 @@ bash ~/.ci-cache/install-sccache.sh        # Rust repos; a no-op once installed
 bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env
 ```
 
-- **Run it again after every `git switch`.** The session is bound to the
-  branch it was minted for. After a switch, the old token keeps writing to
-  the old branch's prefix.
-- **Run it again after 6 h.** The token expires, and every read then fails
-  as a miss.
+- **Sourcing renews it.** The session is bound to the branch it was minted
+  for and lasts 6 h. `source ~/.ci-cache.env` reruns the script when the
+  repo is on another branch than the session's, or the token has less than
+  15 minutes left. If that fails (no key in the environment, the Worker
+  down), it unsets the cache variables and returns 1, so a build never
+  writes to the old branch's prefix with a stale token. A branch pinned with
+  `CI_CACHE_BRANCH` is never switched; `CI_CACHE_NO_REFRESH=1` turns it off.
 - The script stops the sccache server, so the next build starts one with the
   new token.
 - It needs a branch: on a detached HEAD it fails, unless `CI_CACHE_BRANCH`

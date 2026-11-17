@@ -1,14 +1,14 @@
 # Keys: minting, storing, uploading, rotating
 
 There are three kinds of credential:
-- **Sandbox keys** (`sk_…`): one per repo, used by Boat sandboxes to get a
-  `rama` session.
+- **Sandbox keys** (`sk_…`): one per repo and label (a provider or machine
+  pool), used by sandboxes to get a `rama` session.
 - **Stats keys** (`rk_…`): read-only metrics.
 - **Session tokens**: minted by the Worker, 6 h.
 
 The Worker stores only the **sha256** of each key. The plaintext exists in
-exactly two places: the engine owner's local key files and the repo's Boat
-environment.
+exactly two places: the engine owner's local key files and the sandbox
+provider's secret store (a Boat environment, for example).
 
 ## Contents
 - Where keys live
@@ -23,7 +23,7 @@ environment.
 
 | File | Content |
 | --- | --- |
-| `keys.env` | `CI_CACHE_SANDBOX_KEY_<REPO>=sk_…` (one per repo, the repo name uppercased with `-` → `_`) and `CI_CACHE_STATS_KEY=rk_…` |
+| `keys.env` | `CI_CACHE_SANDBOX_KEY_<REPO>=sk_…` (the default label, the repo name uppercased with `-` → `_`), `CI_CACHE_SANDBOX_KEY_<REPO>__<LABEL>=sk_…` (any other label) and `CI_CACHE_STATS_KEY=rk_…` |
 | `sandbox_keys.json` | the **full** `SANDBOX_KEYS` map, `{"<sha256>": {"repoId", "repo", "label"}}`: what gets uploaded |
 | `stats_keys.json` | the full `STATS_KEYS` map |
 | `session_secret` | the Worker's `SESSION_SECRET` |
@@ -51,14 +51,18 @@ bash ~/.claude/skills/ci-cache/scripts/mint-sandbox-key.sh <owner>/<repo> [label
 ```
 
 - It resolves the numeric repo id with `gh api repos/<repo> --jq .id`.
-- It refuses if the repo already has a key. Pass `--rotate` to replace it,
-  which also drops the old hash from the map.
+- One key per repo **and label** (default `sandbox`): give each provider or
+  machine pool its own label, so each can be rotated or revoked alone.
+- It refuses if the repo already has a key with that label. Pass `--rotate`
+  to replace it, which also drops the old hash from the map (and the
+  variable of a key minted before labels had their own variable).
 - `CI_CACHE_KEYS_DIR` (default `~/.config/ci-cache`) and `CI_CACHE_REPO`
   (the engine checkout; by default the clone the skill lives in, otherwise
   required) set the paths. Test it with a temporary
   `CI_CACHE_KEYS_DIR`.
-- It prints the variable name, the number of entries in the map and the two
-  next commands. It never prints the key or the hash.
+- It prints the variable name, the repo's labels, the number of entries in
+  the map and the two next commands. It never prints the key or the hash.
+  `pnpm e2e:mint` (in the engine) tests all of this in a temporary directory.
 
 Calling `node scripts/new-key.mjs` directly prints the plaintext key to the
 terminal, and the terminal may be a log. Don't.
@@ -100,11 +104,12 @@ A stats key with no repo ids (it reads every repo), saved as
 
 ## Rotating a leaked key
 
-1. `mint-sandbox-key.sh <repo> --rotate`: a new key, and the old hash
-   removed from the map.
+1. `mint-sandbox-key.sh <repo> [label] --rotate`: a new key, and the old
+   hash removed from the map. Other labels' keys keep working.
 2. Upload the map (above). The old key stops working at that moment.
-3. Update the Boat environment with `scripts/connect-sandbox.sh <repo>`.
-   It sets the key again and runs `boat env upgrade <env>` (`sandbox.md`).
+3. Put the new key in the sandbox provider. In Boat:
+   `scripts/connect-sandbox.sh <repo> [--label <label>]` sets it again and
+   runs `boat env upgrade <env>` (`sandbox.md`).
 4. Sessions minted with the old key stay valid until they expire (6 h at
    most). There is no revocation list. If that matters, rotate
    `SESSION_SECRET`, which invalidates **every** session, CI included, for

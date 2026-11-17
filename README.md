@@ -90,10 +90,10 @@ PR's CI:
 
 1. Mint a sandbox key, add its hash to the `SANDBOX_KEYS` secret and put the key in the
    sandbox as `CI_CACHE_SANDBOX_KEY`, next to `CI_CACHE_URL` ([Keys](#secrets-wrangler-secret-put)).
-2. Put `scripts/ci-cache-env.sh` and `scripts/cache-fingerprint.sh` side by side in the
-   sandbox (`~/.ci-cache/`), and before building run
-   `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env`
-   ([Sandboxes](#boat-sandbox-scriptsci-cache-envsh)).
+2. Install the client in the sandbox with one pinned, SHA-256-checked line, and before
+   building run `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env`
+   ([Sandboxes](#sandboxes-scriptsci-cache-envsh)). Any provider works: Boat, a container,
+   a VM or your laptop.
 3. Check it: the PR's setup step compares the sandbox's cache fingerprint with CI's and
    warns about every difference (`ci-cache cache key mismatch`), and
    `GET /v1/stats/branches` shows how much of the sandbox's work CI reused ([Metrics](#metrics)).
@@ -189,7 +189,7 @@ runs against `wrangler dev` in `scripts/e2e/`.
 | Docker / BuildKit layers | Not served by ci-cache | The skill recommends BuildKit `type=gha` (the Actions cache); ci-cache has no Docker credentials or registry API |
 | Nx, Bazel, Gradle | Not served by ci-cache | Not supported: their remote cache protocols are not implemented ([adding support](#adding-support-for-your-stack)) |
 | GitHub Actions | Tested (e2e) | Sessions from GitHub OIDC. `setup/setup.sh` is tested with a fake OIDC endpoint (the real one only exists inside Actions). Linux runners; the sccache install and `mount-workdir` are Linux-only (`mount-workdir: auto` skips the mount elsewhere), so a macOS runner can use Turbo only (`sccache: "false"`, should work, untested) |
-| Boat sandboxes | Tested (e2e) | `scripts/ci-cache-env.sh` with an `sk_` key against `wrangler dev`. Any environment that can run a bash script with an `sk_` key should work the same way (untested) |
+| Sandboxes (any provider) | Tested (e2e) | `scripts/ci-cache-env.sh` with an `sk_` key against `wrangler dev`, in bash, zsh and dash; the installer on Ubuntu (Docker). Boat is the provider used in production; any machine that can run a bash script with an `sk_` key works the same way |
 | Other CI providers (GitLab, CircleCI, Buildkite, …) | Not served by ci-cache | Not supported: only GitHub's OIDC issuer is accepted. An `sk_` key would work technically, but always gets the branch tier, so it could never fill `main/` |
 
 ### Package managers
@@ -211,7 +211,7 @@ pnpm store or `~/.cargo/registry`. Package managers matter only through the tool
 flowchart TB
   subgraph clients["Clients"]
     direction LR
-    SB["Boat sandbox<br/>sk_ key + git branch<br/>ci-cache-env.sh"]
+    SB["Agent sandbox<br/>sk_ key + git branch<br/>ci-cache-env.sh"]
     PR["PR / branch CI<br/>GitHub OIDC<br/>setup action"]
     MC["main CI, push<br/>GitHub OIDC<br/>setup action"]
   end
@@ -251,7 +251,7 @@ binding).
 ```mermaid
 sequenceDiagram
   autonumber
-  participant A as Agent in a Boat sandbox
+  participant A as Agent in a sandbox
   participant W as ci-cache Worker
   participant R as R2
   participant CI as PR CI (setup ... report)
@@ -508,7 +508,9 @@ Worker an unguessable name (`bootstrap.sh` does both).
 
 Keys are generated with `node scripts/new-key.mjs sandbox <repoId> <owner/repo> [label]` or
 `node scripts/new-key.mjs stats <label> [repoId,...]`: it prints the key (only that once) and
-the entry with its hash to merge into the secret. The Worker never stores plaintext keys.
+the entry with its hash to merge into the secret. A repo can have several sandbox keys, one
+per label (provider or machine pool); `skill/ci-cache/scripts/mint-sandbox-key.sh` keeps the
+map and the keys without printing them. The Worker never stores plaintext keys.
 
 ## Deploying with wrangler
 
@@ -652,6 +654,7 @@ jobs:
         with:
           url: ${{ secrets.CI_CACHE_URL }}   # a secret: GitHub masks it in logs
           # mount-workdir: auto (default): with Rust, builds at /home/user/<repo> like the sandboxes
+          # workdir-path: /workspace/<repo>   # if your sandboxes clone somewhere else
       - working-directory: ${{ steps.cache.outputs.workdir || github.workspace }}
         run: |
           pnpm turbo run build
@@ -674,7 +677,9 @@ its host and the tokens (`::add-mask::`) and exports:
   `SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true` (no `PROPFIND` before each
   write) and `CARGO_INCREMENTAL=0`.
 - `mount-workdir` mounts the checkout with `sudo mount --bind "$GITHUB_WORKSPACE"
-  /home/user/<repo>` (the path Boat sandboxes clone to) so that sccache keys match; the
+  <workdir-path>` so that sccache keys match the sandboxes'. `workdir-path` is where your
+  sandboxes clone the repo, `/home/user/<repo>` by default (Boat's path); set it to your
+  provider's (an absolute path; changing it costs one cold run). The
   `workdir` output says where to build. `auto` (the default) mounts only when there is a
   `Cargo.toml` (the same detection as `sccache: auto`), on Linux, with passwordless sudo;
   otherwise, or if the target isn't empty or the mount fails, it logs why and builds in
@@ -725,29 +730,64 @@ need the server alive until then: set `SCCACHE_IDLE_TIMEOUT: "0"` in the job's `
 Turbo summaries are looked for under `working-directory` (default the setup action's
 `workdir`), up to 4 levels deep.
 
-### Boat sandbox: `scripts/ci-cache-env.sh`
+### Sandboxes: `scripts/ci-cache-env.sh`
+
+Any machine an agent builds in can share its branch's tier: it needs bash, curl and git,
+plus two values in its environment, `CI_CACHE_URL` and a sandbox key as
+`CI_CACHE_SANDBOX_KEY`. A sandbox key always gets the branch tier (`rama`), even on `main`.
+
+**Keys.** One key per repo and provider (or machine pool), so each rotates on its own:
+`skill/ci-cache/scripts/mint-sandbox-key.sh <owner/repo> [label] [--rotate]` mints one per
+label without printing it and merges its hash into the `SANDBOX_KEYS` map you upload
+([Secrets](#secrets-wrangler-secret-put)). By hand: `node scripts/new-key.mjs sandbox
+<repoId> <owner/repo> <label>`, where nobody reads the terminal.
+
+**Install** (once per sandbox image or boot), pinned to a commit of this repo; every file is
+checked against a SHA-256 embedded in the installer, and a mismatch installs nothing:
 
 ```sh
-# Once per repo: node scripts/new-key.mjs sandbox <repoId> <owner/repo> boat
-# and store the key in the sandbox's secrets as CI_CACHE_SANDBOX_KEY.
-export CI_CACHE_URL=https://ci-cache.<your-subdomain>.workers.dev
-cd /home/user/<repo>
-bash ci-cache-env.sh            # takes the git branch; CI_CACHE_BRANCH for another one
-source ~/.ci-cache.env
+ref=<full commit SHA of OmarAlex24/ci-cache>
+curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
+  bash -s -- --ref "$ref" --rust      # --rust also installs sccache (Linux x86_64/aarch64)
 ```
 
-It writes `TURBO_API`, `TURBO_TOKEN`, `TURBO_TEAM`, `SCCACHE_WEBDAV_ENDPOINT`,
-`SCCACHE_WEBDAV_TOKEN`, `SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true`, `CARGO_INCREMENTAL=0` and,
-if sccache is installed, `RUSTC_WRAPPER=sccache` to `~/.ci-cache.env` (mode 600); it
+It puts `ci-cache-env.sh` and `cache-fingerprint.sh` in `~/.ci-cache/` (`--dir` for another
+place; `CI_CACHE_SOURCE` for a fork's raw URL). From a checkout:
+`bash scripts/install-sandbox.sh [--rust]`.
+
+**Use**, in the repo, on the branch the agent works on:
+
+```sh
+bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env
+```
+
+The script takes the git branch (`CI_CACHE_BRANCH` for another one) and writes `TURBO_API`,
+`TURBO_TOKEN`, `TURBO_TEAM`, `SCCACHE_WEBDAV_ENDPOINT`, `SCCACHE_WEBDAV_TOKEN`,
+`SCCACHE_WEBDAV_DISABLE_CREATE_DIR=true`, `CARGO_INCREMENTAL=0` and, if sccache is installed,
+`RUSTC_WRAPPER=sccache` to `~/.ci-cache.env` (mode 600; the key is never written there); it
 restarts the sccache server so it picks up the new token. Then it uploads the checkout's
 cache fingerprint (it needs `cache-fingerprint.sh` next to it, or
-`CI_CACHE_FINGERPRINT_SCRIPT`) so the branch's CI can compare it; a failed upload is only
-a warning. A sandbox key always gets the
-branch tier (`rama`). The token lasts 6 h: run the script again if the agent's session lasts
-longer.
+`CI_CACHE_FINGERPRINT_SCRIPT`) so the branch's CI can compare it; a failed upload is only a
+warning.
 
-For sccache to hit between sandbox and CI, both must build at the same path
-(`/home/user/<repo>`), with the same toolchain and the same flags.
+**Renewal.** Sourcing `~/.ci-cache.env` renews the session by itself when the repo's branch
+has changed (`git switch`) or the 6 h token has less than 15 minutes left: it reruns the
+script, which needs `CI_CACHE_SANDBOX_KEY` still in the environment. If renewal fails it
+says why, unsets the cache variables and returns 1, so a build never writes to the wrong
+branch with a stale token. It works in bash, zsh and dash, under `set -u`, from any directory
+(it checks the repo the session was made for); `CI_CACHE_NO_REFRESH=1` turns it off, and a branch pinned with
+`CI_CACHE_BRANCH` is never switched. So put `source ~/.ci-cache.env` in each shell that
+builds (or the agent's shell profile).
+
+**The path.** sccache keys include the absolute path, so sandbox and CI must build at the
+same one, with the same toolchain and flags: clone at `/home/user/<repo>` (the action's
+default) or give the action your path as `workdir-path`.
+
+**Recipes.** Boat: the skill's `connect-sandbox.sh <owner/repo> <env>` stores the key in a
+Boat environment (`--label` for a labeled key) and installs the scripts. Any other shell:
+export the two values from your provider's secret store, run the installer above in the
+image or at boot, and clone at the path `workdir-path` names. A recipe for your provider is
+welcome: [CONTRIBUTING.md](CONTRIBUTING.md) has the template.
 
 ## Measuring the gain
 
@@ -845,6 +885,10 @@ pnpm lint:sh                        # shellcheck of the client scripts
   report action's script on fixtures taken from real turbo and sccache output, and on a
   real turbo run with `TURBO_RUN_SUMMARY=true`. `pnpm e2e:durations` runs
   `scripts/job-durations.sh` against a fake `gh` (and checks the skill's copy is identical).
+  `pnpm e2e:install` pipes `scripts/install-sandbox.sh` from a local server that serves this
+  checkout by ref (a tampered file installs nothing) and, with Docker, installs sccache on
+  Ubuntu with `--rust`. `pnpm e2e:mint` runs the skill's `mint-sandbox-key.sh` in a
+  temporary key directory (labels, `--rotate`, no key ever printed).
 - `pnpm e2e:bootstrap` runs `scripts/bootstrap.sh` against a fake `wrangler` that records
   every call, and a local fake of the subdomain API (no Cloudflare account is touched): dry
   run (also from a copy with no wrangler at all), a first run, an idempotent rerun,

@@ -2,7 +2,7 @@
 
 ci-cache is a Cloudflare Worker (Hono) on R2 that serves a Turbo remote cache
 (`/v8/artifacts`) and an sccache WebDAV backend (`/dav/`) per repository. A `main/` tier is
-written only by CI on main, and per-branch tiers are written by Boat sandboxes (`sk_` keys)
+written only by CI on main, and per-branch tiers are written by agents' sandboxes (`sk_` keys, any provider)
 and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_` keys,
 [`openapi.yaml`](openapi.yaml)). The details are in [`README.md`](README.md).
 
@@ -30,13 +30,16 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
    (before `Swatinem/rust-cache`) with `continue-on-error: true`, the build in
    `${{ steps.cache.outputs.workdir || github.workspace }}`, and the `report` step last with
    `if: always()` and `continue-on-error: true` (example below).
-3. Sandboxes: `node scripts/new-key.mjs sandbox <repoId> <owner/repo> boat` where nobody reads
-   the terminal (or `skill/ci-cache/scripts/mint-sandbox-key.sh`), merge the hash entry into
-   `SANDBOX_KEYS` (`pnpm wrangler secret put SANDBOX_KEYS --name <worker>`: it replaces the
-   whole map), give the sandbox `CI_CACHE_SANDBOX_KEY`, and put `ci-cache-env.sh` and
-   `cache-fingerprint.sh` side by side in `~/.ci-cache/`
-   (`skill/ci-cache/scripts/connect-sandbox.sh` does all of it). The agent runs
-   `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env` on its branch.
+3. Sandboxes (optional, any provider): `skill/ci-cache/scripts/mint-sandbox-key.sh
+   <owner/repo> [label]` (one key per label, never printed; or `node scripts/new-key.mjs
+   sandbox <repoId> <owner/repo> <label>` where nobody reads the terminal), merge the hash
+   entry into `SANDBOX_KEYS` (`pnpm wrangler secret put SANDBOX_KEYS --name <worker>`: it
+   replaces the whole map), give the sandbox `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY`, and
+   install the client with `scripts/install-sandbox.sh` (pinned by ref, SHA-256 checked;
+   README "Sandboxes"). In Boat, `skill/ci-cache/scripts/connect-sandbox.sh` does all of it.
+   The agent runs `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env` on its
+   branch; if the sandbox clones elsewhere than `/home/user/<repo>`, set the action's
+   `workdir-path` to that path.
 4. Verify: the setup log says `ci-cache: session rama` on a PR, the job summary has the
    ci-cache table, and the second run on the same branch shows sccache/Turbo hits.
 
@@ -65,7 +68,7 @@ and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_
 | `src/stats/` | `/v1/stats`, `/v1/stats/branches`, `/v1/stats/repos` (AE SQL API) |
 | `setup/` | the composite GitHub Action (`action.yml` + `setup.sh` + `fingerprint-compare.sh`) |
 | `report/` | the report action (`action.yml` + `report.sh`): a job summary table at the end of the job |
-| `scripts/` | `bootstrap.sh` (deploy your own instance), `ci-cache-env.sh` (sandbox side), `cache-fingerprint.sh`, `fingerprint-diff.sh` and `job-durations.sh` (the skill keeps identical copies), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
+| `scripts/` | `bootstrap.sh` (deploy your own instance), `ci-cache-env.sh` (sandbox side), `install-sandbox.sh` (installs it, SHA-256 checked; `--check-sums` after changing a file it installs), `cache-fingerprint.sh`, `fingerprint-diff.sh` and `job-durations.sh` (the skill keeps identical copies), `new-key.mjs`, `mint-session.mjs`, `e2e/` |
 | `test/` | vitest in the Workers runtime (`@cloudflare/vitest-pool-workers`) |
 | `skill/ci-cache/` | Claude Code skill that onboards other repos onto this engine |
 | `openapi.yaml` | the API contract; keep it in sync with `src/` |
@@ -78,7 +81,7 @@ cp .dev.vars.example .dev.vars   # once; e2e needs a SESSION_SECRET in it
 pnpm check                       # typecheck + oxlint + vitest
 pnpm e2e                         # real turbo, sccache, ci-cache-env.sh and setup.sh against wrangler dev
 pnpm lint:openapi                # redocly lint of openapi.yaml
-pnpm lint:sh                     # shellcheck of the client scripts
+pnpm lint:sh                     # shellcheck of the client scripts + the installer's SHA-256 sums
 ```
 
 Never run `pnpm run deploy`, `scripts/bootstrap.sh` (without `--dry-run`), `wrangler secret
@@ -148,16 +151,24 @@ The repo's owner must be in the Worker's `ALLOWED_OWNERS`, or `/v1/session` answ
 `CI_CACHE_URL` is an Actions **secret**, not a variable: GitHub masks it in logs, so the
 Worker's URL never shows up in a public repo's runs (the action also `::add-mask::`s it).
 
-**Sandbox** (Boat, or any shell with an `sk_` key). Mint a key with
-`node scripts/new-key.mjs sandbox <repoId> <owner/repo> boat` (it prints the key once: run it
-where nobody reads the terminal, or use `skill/ci-cache/scripts/mint-sandbox-key.sh`), merge
-the hash entry into `SANDBOX_KEYS`, and give the sandbox `CI_CACHE_URL` and
-`CI_CACHE_SANDBOX_KEY`. Then, in the repo, on the PR's branch:
+**Sandbox** (any shell with an `sk_` key: Boat, a container, a VM). Mint a key with
+`skill/ci-cache/scripts/mint-sandbox-key.sh <owner/repo> [label]` (one per label, stored
+without printing it) or `node scripts/new-key.mjs sandbox <repoId> <owner/repo> <label>` (it
+prints the key once: run it where nobody reads the terminal), merge the hash entry into
+`SANDBOX_KEYS`, and give the sandbox `CI_CACHE_URL` and `CI_CACHE_SANDBOX_KEY`. Install the
+client, then, in the repo, on the PR's branch:
 
 ```sh
-# scripts/ci-cache-env.sh from this repo, delivered into the sandbox (the skill puts it at ~/.ci-cache/)
-bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env   # again after every git switch and every 6 h
+ref=<full commit SHA of OmarAlex24/ci-cache>
+curl -fsSL "https://raw.githubusercontent.com/OmarAlex24/ci-cache/$ref/scripts/install-sandbox.sh" |
+  bash -s -- --ref "$ref" [--rust]
+bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env
+# later shells: source ~/.ci-cache.env (it renews on a git switch and before the 6 h expiry)
 ```
+
+Sandbox and CI must build at the same absolute path: `/home/user/<repo>` by default, or the
+action's `workdir-path`. Provider recipes follow the template in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **Exported variables** (by the action to `$GITHUB_ENV`, by `ci-cache-env.sh` to
 `~/.ci-cache.env`):
@@ -182,5 +193,5 @@ bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env   # again after every
   (every `KEY` line is a reason to miss).
 
 The [`skill/ci-cache`](skill/ci-cache) skill does all of this step by step (audit, keys,
-Rust/Turbo/Docker wiring, Boat environments, measurement). Its scripts read `CI_CACHE_URL`,
+Rust/Turbo/Docker wiring, sandboxes, measurement). Its scripts read `CI_CACHE_URL`,
 `CI_CACHE_REPO` and `CI_CACHE_ALLOWED_OWNERS`.

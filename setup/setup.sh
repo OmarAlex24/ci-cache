@@ -87,12 +87,17 @@ if [[ -n $(find "$GITHUB_WORKSPACE" -maxdepth 3 -name Cargo.toml -not -path '*/n
   has_rust=true
 fi
 
-# 3. Working directory: the same path Boat sandboxes use (/home/user/<repo>), so that
-#    sccache keys (which include the path) match.
+# 3. Working directory: the path the sandboxes build in (workdir-path; by default
+#    /home/user/<repo>, Boat's), so that sccache keys (which include the path) match.
 #    true: mount or fail.  auto (default): mount when there is a Cargo.toml, on Linux, with
 #    passwordless sudo; otherwise, or if mounting fails, build in GITHUB_WORKSPACE.
 workdir=$GITHUB_WORKSPACE
-target=/home/user/$repo_name
+target=${INPUT_WORKDIR_PATH:-/home/user/$repo_name}
+target=${target%/}
+if [[ $target != /* || $target == *..* || $target =~ [[:space:]] || $target == / ]]; then
+  echo "::warning title=ci-cache::workdir-path must be an absolute path without '..' or spaces; using /home/user/$repo_name"
+  target=/home/user/$repo_name
+fi
 mount_workdir() { # <strict: true|false>
   local strict=$1
   skip() {
