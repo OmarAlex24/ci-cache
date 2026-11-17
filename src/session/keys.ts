@@ -10,7 +10,18 @@ export interface SandboxKeyEntry {
   repoId: number;
   repo: string;
   label: string;
+  /**
+   * Optional: the branches this key may open a session for, as patterns. `*` matches any
+   * run of characters except `/`, `**` any run including `/`; everything else is literal.
+   * Absent means any branch. Present, it must hold 1 to 32 patterns.
+   */
+  branches?: string[];
 }
+
+const MAX_BRANCH_PATTERNS = 32;
+// A branch name (as routes.ts accepts it) that may also contain `*`.
+// oxlint-disable-next-line no-control-regex -- excluding control characters is exactly the intent
+const BRANCH_PATTERN = /^[^\x00-\x20\x7f~^:?[\\]{1,255}$/u;
 
 const HASH = /^[0-9a-f]{64}$/u;
 const misconfigured = () => new HttpError(500, "misconfigured", "The service is not configured");
@@ -42,8 +53,37 @@ function isSandboxEntry(value: unknown): value is SandboxKeyEntry {
     v.repoId > 0 &&
     typeof v.repo === "string" &&
     v.repo !== "" &&
-    typeof v.label === "string"
+    typeof v.label === "string" &&
+    (v.branches === undefined || isBranchPatterns(v.branches))
   );
+}
+
+function isBranchPatterns(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= MAX_BRANCH_PATTERNS &&
+    value.every((pattern) => typeof pattern === "string" && BRANCH_PATTERN.test(pattern))
+  );
+}
+
+function patternRegExp(pattern: string): RegExp {
+  const source = pattern
+    .split("**")
+    .map((part) =>
+      part
+        .split("*")
+        .map((literal) => literal.replace(/[.+?^${}()|[\]\\/]/gu, "\\$&"))
+        .join("[^/]*"),
+    )
+    .join(".*");
+  return new RegExp(`^${source}$`, "u");
+}
+
+/** True if the key may open a session for `branch`: no `branches` field, or a pattern matches. */
+export function branchAllowed(entry: SandboxKeyEntry, branch: string): boolean {
+  if (entry.branches === undefined) return true;
+  return entry.branches.some((pattern) => patternRegExp(pattern).test(branch));
 }
 
 function sandboxEntries(source: string | undefined): [string, SandboxKeyEntry][] {

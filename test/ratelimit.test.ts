@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import type { FailureLimiter } from "../src/ratelimit.ts";
 import type { AnalyticsClient } from "../src/stats/analytics.ts";
-import { TEST_REPO_ID, TEST_SANDBOX_KEY, TEST_STATS_KEY } from "./bindings.ts";
+import { TEST_BOUND_KEY, TEST_REPO_ID, TEST_SANDBOX_KEY, TEST_STATS_KEY } from "./bindings.ts";
 import { githubClaims, oidcFixture, sessionToken, signOidc } from "./helpers.ts";
 
 const LIMIT = 3;
@@ -116,6 +116,24 @@ describe("rate limit on requests without a valid credential", () => {
     const otherOwner = await signOidc(privateKey, githubClaims({ repository_owner: "evil" }));
     expect((await request("/v1/session", { ip, method: "POST", auth: `Bearer ${otherOwner}` })).status).toBe(403);
     expect(calls).toEqual(Array(4).fill(`bad-credential:${ip}`));
+  });
+
+  it("does not count a valid key on a branch outside its patterns (403, never 429)", async () => {
+    const { request, calls } = setup();
+    const ip = "203.0.113.9";
+    const denied = () =>
+      request("/v1/session", { ip, method: "POST", auth: `Bearer ${TEST_BOUND_KEY}`, body: JSON.stringify({ branch: "main" }) });
+    for (let i = 0; i < LIMIT * 3; i++) expect((await denied()).status).toBe(403);
+    expect(calls).toEqual([]);
+    // Past the threshold, the same IP still gets a session on an allowed branch.
+    const allowed = await request("/v1/session", {
+      ip,
+      method: "POST",
+      auth: `Bearer ${TEST_BOUND_KEY}`,
+      body: JSON.stringify({ branch: "agent/x" }),
+    });
+    expect(allowed.status).toBe(200);
+    expect(calls).toEqual([]);
   });
 
   it("does not count 400s (a bad branch is not a bad credential)", async () => {

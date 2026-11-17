@@ -74,8 +74,11 @@ paths:
         4. any other ref → `rama` = the ref name without `refs/heads/`
 
         With a sandbox key (`Authorization: Bearer sk_...`) the body must include `branch`;
-        the tier is ALWAYS `rama`, even if the branch is named `main`. In the OIDC case the
-        body is ignored.
+        the tier is ALWAYS `rama`, even if the branch is named `main`. A key whose
+        `SANDBOX_KEYS` entry has `branches` patterns only gets a session for a branch that
+        matches one of them (`*` within one path segment, `**` across `/`); any other branch
+        gets a 403, which does not count against the bad-credential rate limit. In the OIDC
+        case the body is ignored.
       security:
         - githubOidc: []
         - sandboxKey: []
@@ -97,7 +100,10 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
         "403":
-          description: The repository owner is not in ALLOWED_OWNERS
+          description: >-
+            OIDC: the repository owner is not in ALLOWED_OWNERS. Sandbox key: the branch
+            matches none of the key's `branches` patterns. The body is the same generic error
+            in both cases.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
