@@ -6,6 +6,46 @@ written only by CI on main, and per-branch tiers are written by Boat sandboxes (
 and by PR CI (GitHub OIDC). Metrics are a read-only JSON API (`/v1/stats*`, `rk_` keys,
 [`openapi.yaml`](openapi.yaml)). The details are in [`README.md`](README.md).
 
+## Deploy your own instance
+
+1. `pnpm install && pnpm wrangler login` (or `CLOUDFLARE_API_TOKEN`).
+2. `bash scripts/bootstrap.sh --allowed-owners <owner[,owner]> --dry-run`: read the
+   commands, then run it without `--dry-run`. Add `--location weur|enam|wnam|apac|…` (next to
+   whoever compiles; only for a new bucket) and `--with-stats` with `CF_ACCOUNT_ID` and
+   `CF_API_TOKEN` in the environment if you want `/v1/stats`. Note the Worker name it prints:
+   reruns take `--name <it>`.
+3. Save the printed URL as the GitHub Actions **secret** `CI_CACHE_URL` (repo or org), and as
+   `CI_CACHE_URL` in the sandboxes' environment. Done.
+
+## Connect a repo
+
+1. `gh secret set CI_CACHE_URL --repo <owner/repo>`; the owner must be in the Worker's
+   `ALLOWED_OWNERS`.
+2. In the workflow: `permissions: id-token: write`, the `setup` step right after checkout
+   (before `Swatinem/rust-cache`) with `continue-on-error: true`, the build in
+   `${{ steps.cache.outputs.workdir || github.workspace }}`, and the `report` step last with
+   `if: always()` and `continue-on-error: true` (example below).
+3. Sandboxes: `node scripts/new-key.mjs sandbox <repoId> <owner/repo> boat` where nobody reads
+   the terminal (or `skill/ci-cache/scripts/mint-sandbox-key.sh`), merge the hash entry into
+   `SANDBOX_KEYS` (`pnpm wrangler secret put SANDBOX_KEYS --name <worker>`: it replaces the
+   whole map), give the sandbox `CI_CACHE_SANDBOX_KEY`, and put `ci-cache-env.sh` and
+   `cache-fingerprint.sh` side by side in `~/.ci-cache/`
+   (`skill/ci-cache/scripts/connect-sandbox.sh` does all of it). The agent runs
+   `bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env` on its branch.
+4. Verify: the setup log says `ci-cache: session rama` on a PR, the job summary has the
+   ci-cache table, and the second run on the same branch shows sccache/Turbo hits.
+
+**No hits?** In this order:
+- `ci-cache cache key mismatch` warnings and the "sandbox vs CI fingerprint" table in the job
+  summary: each row is an input (`RUSTFLAGS`, toolchain, path, `CARGO_HOME`…) that differs
+  between the sandbox and CI. Align them.
+- The report table: the sccache hit rate, Turbo tasks from cache, and the fingerprint row
+  (`no sandbox fingerprint for this branch` means the sandbox didn't run `ci-cache-env.sh` on
+  that branch, or `cache-fingerprint.sh` isn't next to it).
+- `GET /v1/stats/branches?repo=<repoId>` with an `rk_` key: `reuseAlert: true` means the
+  sandbox wrote and CI reused none of it.
+- The tier: `main-ro` (schedule, dispatch) never writes; fork PRs get no OIDC token.
+
 ## Layout
 
 | Path | What lives there |
@@ -57,13 +97,20 @@ production. `pnpm e2e:bootstrap` tests the bootstrap with a fake `wrangler`.
   `SESSION_SECRET`. Not in Worker errors, scripts, tests' output, PRs or commits. Errors are
   generic JSON. Cache fingerprints are uploaded, so `cache-fingerprint.sh` must keep
   filtering secrets out.
+- **New endpoints require a session** and only touch the session's own tier and branch
+  (`src/storage/tiers.ts`), never a prefix outside `main/` and `ramas/`: the two lifecycle
+  rules must keep covering everything. `/v1/fingerprint` is the model.
+- **Bad credentials are rate limited, valid ones never** (`src/ratelimit.ts`): the limiter
+  is only consulted after a credential was rejected. Keep it that way: CI runners share IPs.
 - **Fail loudly, degrade at the caller.** `setup.sh` and `ci-cache-env.sh` exit non-zero
   with a clear message when they can't get a session (no OIDC permission, 401, Worker down);
   keep it that way. Only an sccache server that won't start degrades inside the action (a
-  warning, no `RUSTC_WRAPPER`). Workflows put `continue-on-error: true` on the action step,
-  so a cache problem makes a run slower, never red.
+  warning, no `RUSTC_WRAPPER`), and so do the diagnostics (`mount-workdir: auto`, the
+  fingerprint upload and comparison, the report action): they log and exit 0. Workflows put
+  `continue-on-error: true` on the action step, so a cache problem makes a run slower, never
+  red.
 
-## Connecting a repo to ci-cache
+## Connecting a repo to ci-cache (details)
 
 **CI** (GitHub Actions). The job needs `id-token: write`. Put the action before any
 `Swatinem/rust-cache` step:

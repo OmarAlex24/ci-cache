@@ -32,7 +32,8 @@ and the traps it found.
   task and the machine's CPU and steal in each task's window. Use it to find
   which task is the critical path. A cache that speeds up a task off the
   critical path doesn't move the job.
-- **The cache**: `sccache --show-stats` in the job summary, and
+- **The cache**: the report action's table in the job summary (sccache
+  hits and hit rate, Turbo tasks from cache, the fingerprint check), and
   `scripts/cache-stats.sh` for the Worker's view.
 
 ## Machine classes
@@ -132,7 +133,8 @@ To see where the time goes:
     experiment), which the script shows as `no-ci`. Not an error there.
 - `byKind.sandbox` hit rate tells you whether sandboxes are reading `main/`
   well. A low rate usually means the sandbox's environment differs from
-  CI's (`fingerprint-diff.sh`).
+  CI's: read the action's `cache key mismatch` warnings, or run
+  `fingerprint-diff.sh`.
 
 ## Spending starts on measurement
 

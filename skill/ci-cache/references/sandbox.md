@@ -192,7 +192,10 @@ bash ~/.ci-cache/ci-cache-env.sh && source ~/.ci-cache.env
 3. Build what CI will build, with the same profile and features (`cargo
    build --locked`, `cargo clippy --all-targets`, `cargo test --no-run`).
    The sandbox writes those objects to the branch tier.
-4. Push. PR CI reads the branch tier first, then `main/`.
+4. Push. PR CI reads the branch tier first, then `main/`, and compares
+   its cache fingerprint with the one `ci-cache-env.sh` uploaded for the
+   branch: a `ci-cache cache key mismatch` warning names each input that
+   differs (`rust.md`, "Fingerprint parity").
 5. Check the reuse with `scripts/cache-stats.sh <owner/repo> --branch <name>`:
    - `ciHitsOnSandboxObjects / sandboxWrites` is the share of what the
      sandbox compiled that CI reused. The first rollout measured **96 %**.
@@ -248,6 +251,9 @@ cost **$0.0026**:
   names with `compgen -e`.
 - Read `~/.ci-cache.env` with `sed 's/=.*//'`, never `cat`: it holds the
   session token.
-- The fingerprint script filters `token|key|secret` out of its variable
-  list, but **don't paste raw `env` output** anywhere.
+- The fingerprint script drops any variable line mentioning a token, key,
+  secret, password, credential or auth, and redacts `sk_`/`rk_` values and
+  URL credentials (`ci-cache-env.sh` uploads its output, and refuses to if
+  the key or token shows up). Still, **don't paste raw `env` output**
+  anywhere.
 - If a key leaks (in a log, a PR, a chat), rotate it (`keys.md`).

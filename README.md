@@ -44,8 +44,9 @@ No dashboard: metrics come out of a JSON API documented in [`openapi.yaml`](open
    key in the sandbox as `CI_CACHE_SANDBOX_KEY`, then run
    `bash scripts/ci-cache-env.sh && source ~/.ci-cache.env` before building:
    [Boat sandbox](#boat-sandbox-scriptsci-cache-envsh).
-4. **Check it hits**: `sccache --show-stats`, turbo's `cache hit, replaying logs`, and
-   `GET /v1/stats/branches` ([Metrics](#metrics)).
+4. **Check it hits**: the report step's table in the job summary (sccache hit rate, Turbo
+   tasks from cache, the sandbox vs CI fingerprint check), any `ci-cache cache key
+   mismatch` warning, and `GET /v1/stats/branches` ([Metrics](#metrics)).
 
 Agents working on this repo, or connecting another repo to it, start at
 [`AGENTS.md`](AGENTS.md). The [`skill/ci-cache`](skill/ci-cache) Claude Code skill automates
@@ -82,38 +83,76 @@ pnpm store or `~/.cargo/registry`. Package managers matter only through the tool
 
 ## Architecture
 
-```
-  Boat sandbox (agent)            PR / branch CI             main CI (push)
-  sk_... key + git branch         GitHub Actions OIDC        GitHub Actions OIDC
-            │                              │                          │
-            └──────────────┬───────────────┴──────────────────────────┘
-                           │  POST /v1/session
-                           ▼
-        ┌──────────────────────────────────────────────┐
-        │ ci-cache Worker (Hono)                       │
-        │  1. verifies the credential                  │
-        │     · OIDC: signature (GitHub JWKS), iss,    │
-        │       aud, exp/nbf, allowed owner            │
-        │     · sk_: sha256 in SANDBOX_KEYS            │
-        │  2. picks the tier from the identity         │
-        │  3. signs a session token (HMAC-SHA256)      │
-        └──────────────────────┬───────────────────────┘
-                               │ session token (6 h)
-                               ▼
-     turbo ── /v8/artifacts/* ─┐        ┌─ /dav/* ── sccache (RUSTC_WRAPPER)
-                               ▼        ▼
-        ┌──────────────────────────────────────────────┐
-        │ Worker: only verifies the token's signature  │──► Analytics Engine (METRICS)
-        │  tier → read/write prefixes                  │    one data point per request
-        └──────────────────────┬───────────────────────┘
-                               │ CACHE binding (no R2 keys)
-                               ▼
-        ┌──────────────────────────────────────────────┐
-        │ R2: main/<repoId>/{turbo,sccache}/...        │  rule: expires at 30 days
-        │     ramas/<repoId>/<branchKey>/{turbo,...}/  │  rule: expires at 7 days
-        └──────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph clients["Clients"]
+    direction LR
+    SB["Boat sandbox<br/>sk_ key + git branch<br/>ci-cache-env.sh"]
+    PR["PR / branch CI<br/>GitHub OIDC<br/>setup action"]
+    MC["main CI, push<br/>GitHub OIDC<br/>setup action"]
+  end
 
-  External frontend ── GET /v1/stats* (read-only rk_ key) ──► Analytics Engine SQL API
+  subgraph worker["ci-cache Worker (Hono)"]
+    direction LR
+    S["POST /v1/session<br/>verifies OIDC or sk_,<br/>picks the tier from the identity,<br/>signs an HMAC token (6 h)"]
+    C["/v8/artifacts (Turbo)<br/>/dav (sccache)<br/>/v1/fingerprint<br/>verify the token only"]
+    ST["GET /v1/stats*<br/>rk_ key"]
+  end
+
+  subgraph r2["R2 bucket (CACHE binding)"]
+    direction LR
+    M[("main/repoId/...<br/>expires at 30 days")]
+    B[("ramas/repoId/branchKey/...<br/>expires at 7 days")]
+  end
+
+  AE[("Analytics Engine")]
+  HUB["External hub or dashboard"]
+
+  clients -->|"1: credential"| S
+  clients -->|"2: session token"| C
+  C -->|"main tier"| M
+  C -->|"branch tier: own branch, then main/"| B
+  C -->|"one data point per cache request"| AE
+  HUB -->|"rk_ key"| ST
+  ST -->|"SQL API"| AE
+```
+
+Every request without a valid credential counts against a per-IP rate limit; valid tokens
+never do ([Rate limit](#rate-limit-on-bad-credentials)). Each cache request only verifies the
+session token's HMAC signature: no database, no R2 keys in the Worker (it uses the `CACHE`
+binding).
+
+### A pull request, end to end
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant A as Agent in a Boat sandbox
+  participant W as ci-cache Worker
+  participant R as R2
+  participant CI as PR CI (setup ... report)
+
+  A->>W: POST /v1/session (sk_ key, branch feat/x)
+  W-->>A: token: tier rama, branch feat/x
+  A->>W: cargo / turbo build: PUT /dav/..., PUT /v8/artifacts/...
+  W->>R: write ramas/repoId/branchKey(feat/x)/...
+  A->>W: PUT /v1/fingerprint (cache-fingerprint.sh output)
+  Note over A: git push, the PR opens
+  CI->>W: POST /v1/session (GitHub OIDC, head_ref feat/x)
+  W-->>CI: token: tier rama, branch feat/x
+  CI->>W: GET /v1/fingerprint
+  W-->>CI: the sandbox's fingerprint
+  Note over CI: compares it with its own:<br/>a ::warning per key line that differs
+  CI->>W: GET /dav/..., GET /v8/artifacts/...
+  W->>R: read the branch and main/ concurrently
+  alt the sandbox built it
+    R-->>CI: hit from the branch
+  else main built it
+    R-->>CI: hit from main/
+  else nobody did
+    W-->>CI: 404, CI builds and writes to the branch
+  end
+  Note over CI: report step: job summary with tier,<br/>sccache and Turbo hits, fingerprint result
 ```
 
 - `repoId` is the numeric GitHub repo id (it doesn't change on a rename).
@@ -126,6 +165,19 @@ pnpm store or `~/.cargo/registry`. Package managers matter only through the tool
 ## Tiers, and why they prevent poisoning
 
 The client **never picks its tier**: it follows from who the client is.
+
+```mermaid
+flowchart LR
+  MC["main CI<br/>push to main"] ==>|"reads and writes"| M[("main/")]
+  RO["main CI<br/>schedule, dispatch<br/>(main-ro)"] -.->|"reads only"| M
+  PR["PR CI on branch X"] ==>|"reads and writes"| X[("ramas/.../X/")]
+  SB["Sandbox on branch X<br/>(any sk_ key)"] ==>|"reads and writes"| X
+  PR -.->|"reads on a miss"| M
+  SB -.->|"reads on a miss"| M
+```
+
+Nothing on a branch can write to `main/`: only a push to main (an OIDC token signed by
+GitHub) does.
 
 | Identity | Tier | Reads | Writes |
 | --- | --- | --- | --- |
@@ -273,7 +325,7 @@ R2 body keeps streaming afterwards). `curl -w '%{time_starttransfer}
 
 | Binding | Type | What for |
 | --- | --- | --- |
-| `CACHE` | R2 (`ci-cache-weur`) | the cache; the Worker has no R2 keys |
+| `CACHE` | R2 (`ci-cache-weur` in `wrangler.jsonc`; `bootstrap.sh --bucket` deploys a copy with another name) | the cache; the Worker has no R2 keys |
 | `METRICS` | Analytics Engine (dataset `ci_cache`) | one data point per request |
 | `BAD_CREDENTIAL_LIMITER` | Rate Limiting (`ratelimits`, 30 per 60 s) | limits requests without a valid credential, per client IP ([Rate limit](#rate-limit-on-bad-credentials)) |
 
