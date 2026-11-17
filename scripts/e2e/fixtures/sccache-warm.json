@@ -1,0 +1,63 @@
+{
+  "stats": {
+    "compile_requests": 130,
+    "requests_unsupported_compiler": 0,
+    "requests_not_compile": 0,
+    "requests_not_cacheable": 10,
+    "requests_executed": 102,
+    "cache_errors": {
+      "counts": {},
+      "adv_counts": {}
+    },
+    "cache_hits": {
+      "counts": {
+        "Rust": 90
+      },
+      "adv_counts": {
+        "rust": 90
+      }
+    },
+    "cache_misses": {
+      "counts": {
+        "Rust": 12
+      },
+      "adv_counts": {
+        "rust": 12
+      }
+    },
+    "cache_timeouts": 0,
+    "cache_read_errors": 0,
+    "non_cacheable_compilations": 0,
+    "forced_recaches": 0,
+    "cache_write_errors": 0,
+    "cache_writes": 12,
+    "cache_write_duration": {
+      "secs": 1,
+      "nanos": 200000000
+    },
+    "cache_read_hit_duration": {
+      "secs": 0,
+      "nanos": 900000000
+    },
+    "compilations": 12,
+    "compiler_write_duration": {
+      "secs": 24,
+      "nanos": 0
+    },
+    "compile_fails": 0,
+    "not_cached": {
+      "missing input": 8,
+      "-": 2
+    },
+    "dist_compiles": {},
+    "dist_errors": 0,
+    "multi_level": null
+  },
+  "cache_location": "Local disk: \"/tmp/sccache\"",
+  "cache_size": 9834,
+  "max_cache_size": 10737418240,
+  "use_preprocessor_cache_mode": true,
+  "version": "0.19.0",
+  "basedirs": [],
+  "effective_cache_mode": "ReadWrite"
+}

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Tests report/report.sh (the report action) with fixtures taken from real output
-// (turbo 2.11.10 run summaries, sccache 0.19.0 --stats-format json) and with a real turbo
-// run that writes its summaries through TURBO_RUN_SUMMARY=true, as the setup action sets it.
+// (turbo 2.11.10 run summaries, sccache 0.19.0 --stats-format json; sccache-warm.json is
+// that same real output with larger counts and durations) and with a real turbo run that
+// writes its summaries through TURBO_RUN_SUMMARY=true, as the setup action sets it.
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,8 +85,11 @@ try {
   check(r.code === 0, "exits 0");
   check(r.summary.startsWith("### ci-cache\n"), "writes a ci-cache block to the job summary");
   check(r.summary.includes("| Session | `rama` (branch feature/&lt;b&gt;&#124;x) |"), "session tier and branch (escaped)");
-  check(r.summary.includes("| sccache | 1 hits, 2 misses (33.3 % hit rate) |"), "sccache: 1 hit, 2 misses, 33.3 %");
-  check(r.summary.includes("| Turbo | 2 of 4 tasks from cache, 0 of them remote (50.0 %); 2 run(s) |"), "turbo: only this job's runs (2 of 4 from cache)");
+  check(r.summary.includes("| sccache | 1 hits, 2 misses (33.3 % hit rate); no time-saved estimate (fewer than 10 compilations in this job to average) |"), "sccache: 1 hit, 2 misses, 33.3 %, and no estimate from 2 compilations");
+  check(
+    r.summary.includes("| Turbo | 2 of 4 tasks from cache, 0 of them remote (50.0 %); 2 run(s); 339 ms of task time saved (Turbo's timeSaved, summed over tasks) |"),
+    "turbo: only this job's runs (2 of 4 from cache), 166 + 173 ms saved",
+  );
   check(r.summary.includes("**2 line(s) that enter the cache keys differ"), "fingerprint mismatch with the number of lines");
   check(!r.summary.includes("/tmp/sccache") && !r.out.includes("Local disk"), "never prints sccache's cache location");
   check(r.stdout.split("\n").every((l) => l === "" || l.startsWith("ci-cache report: ")), "every log line is prefixed (no workflow commands)");
@@ -95,8 +99,18 @@ try {
   fakeSccache(dir, "sccache-stats.json");
   turboRuns(dir, ["turbo-run-1.json", "turbo-run-3.json"]);
   r = await report(dir, { path: await pathWithoutJq(dir) });
-  check(r.code === 0 && r.summary.includes("1 hits, 2 misses (33.3 % hit rate)") && r.summary.includes("2 of 4 tasks from cache"), "same numbers without jq");
+  check(r.code === 0 && r.summary.includes("1 hits, 2 misses (33.3 % hit rate)") && r.summary.includes("2 of 4 tasks from cache") && r.summary.includes("339 ms of task time saved"), "same numbers without jq");
   check(r.summary.includes("matches the sandbox's"), "fingerprint match");
+
+  console.log("2b. a warm sccache: the time-saved estimate, with and without jq");
+  dir = job("warm", { session: { tier: "rama", branch: "feature/x" } });
+  fakeSccache(dir, "sccache-warm.json");
+  r = await report(dir);
+  // 90 hits × (24 s / 12 compilations) − 0.9 s reading them = 179.1 s.
+  const estimate = "90 hits, 12 misses (88.2 % hit rate); est. ~2 min 59 s of compile time saved (hits × this job's average compile time over 12 compilations; summed over crates, not wall-clock)";
+  check(r.code === 0 && r.summary.includes(`| sccache | ${estimate} |`), "hits × average compile time − hit reads, labeled as an estimate");
+  r = await report(dir, { path: await pathWithoutJq(dir) });
+  check(r.summary.includes(estimate), "the same estimate without jq");
 
   console.log("3. nothing to report");
   dir = job("empty");
@@ -147,7 +161,10 @@ try {
   }
   // A PATH without sccache: the host's real sccache server must not be touched.
   r = await report(dir, { path: await pathWithoutJq(dir) });
-  check(r.code === 0 && r.summary.includes("| Turbo | 1 of 2 tasks from cache, 0 of them remote (50.0 %); 2 run(s) |"), "counts the real run summaries: 1 of 2 from cache");
+  check(
+    r.code === 0 && /\| Turbo \| 1 of 2 tasks from cache, 0 of them remote \(50\.0 %\); 2 run\(s\)(; [0-9.]+ (ms|s) of task time saved \(Turbo's timeSaved, summed over tasks\))? \|/.test(r.summary),
+    "counts the real run summaries: 1 of 2 from cache (and the time saved, when turbo measured any)",
+  );
 
   console.log("e2e report: OK");
 } catch (error) {
